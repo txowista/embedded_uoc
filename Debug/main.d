@@ -41,10 +41,6 @@ main.obj: /home/igor/workspace_v7/PAC1/msp432/timer32.h
 main.obj: /home/igor/workspace_v7/PAC1/msp432/timer_a.h
 main.obj: /home/igor/workspace_v7/PAC1/msp432/uart.h
 main.obj: /home/igor/workspace_v7/PAC1/msp432/wdt_a.h
-main.obj: /opt/ti/ccsv7/tools/compiler/ti-cgt-arm_16.9.4.LTS/include/stdio.h
-main.obj: /opt/ti/ccsv7/tools/compiler/ti-cgt-arm_16.9.4.LTS/include/linkage.h
-main.obj: /opt/ti/ccsv7/tools/compiler/ti-cgt-arm_16.9.4.LTS/include/stdarg.h
-main.obj: /opt/ti/ccsv7/tools/compiler/ti-cgt-arm_16.9.4.LTS/include/string.h
 
 ../main.c: 
 /home/igor/workspace_v7/PAC1/msp432/driverlib.h: 
@@ -87,7 +83,3 @@ main.obj: /opt/ti/ccsv7/tools/compiler/ti-cgt-arm_16.9.4.LTS/include/string.h
 /home/igor/workspace_v7/PAC1/msp432/timer_a.h: 
 /home/igor/workspace_v7/PAC1/msp432/uart.h: 
 /home/igor/workspace_v7/PAC1/msp432/wdt_a.h: 
-/opt/ti/ccsv7/tools/compiler/ti-cgt-arm_16.9.4.LTS/include/stdio.h: 
-/opt/ti/ccsv7/tools/compiler/ti-cgt-arm_16.9.4.LTS/include/linkage.h: 
-/opt/ti/ccsv7/tools/compiler/ti-cgt-arm_16.9.4.LTS/include/stdarg.h: 
-/opt/ti/ccsv7/tools/compiler/ti-cgt-arm_16.9.4.LTS/include/string.h: 

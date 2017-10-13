@@ -34,9 +34,6 @@
 
 // Include DriverLib (MSP432 Peripheral Driver Library)
 #include "driverlib.h"
-/* Standard Includes */
-#include <stdio.h>
-#include <string.h>
 volatile unsigned int S1Debounce = 0; // Deboounce state for button S1
 volatile unsigned int S2Debounce = 0; // Deboounce state for button S2
 volatile int countT2 = 0;
@@ -69,7 +66,7 @@ TIMER_A_CLOCKSOURCE_SMCLK,              // SMCLK Clock Source
 const Timer_A_UpModeConfig upConfigTimer3= {
 TIMER_A_CLOCKSOURCE_SMCLK,              // SMCLK Clock Source
         TIMER_A_CLOCKSOURCE_DIVIDER_64,          // SMCLK/1 = 3MHz
-        9374,                                  // 100ms
+        9374,                                  // 200ms
         TIMER_A_TAIE_INTERRUPT_DISABLE,         // Disable Timer interrupt
         TIMER_A_CCIE_CCR0_INTERRUPT_ENABLE,    // Enable CCR0 interrupt
         TIMER_A_DO_CLEAR                        // Clear value
@@ -94,7 +91,7 @@ int main(void)
     MAP_GPIO_setAsOutputPin(GPIO_PORT_P1, GPIO_PIN0);
     // Fijar a 0 la salida del pin P1.0
     MAP_GPIO_setOutputLowOnPin(GPIO_PORT_P1, GPIO_PIN0);
-    // Configuracion del pin P2.0 como salida
+    // Configuracion del pin P2.0 | P2.1 | P2.2 como salida
     MAP_GPIO_setAsOutputPin(GPIO_PORT_P2,   GPIO_PIN0 | GPIO_PIN1 |GPIO_PIN2);
     MAP_GPIO_setOutputLowOnPin(GPIO_PORT_P2, GPIO_PIN0 |  GPIO_PIN1 |GPIO_PIN2);
 
@@ -117,7 +114,6 @@ int main(void)
 
     // Habilita el procesador para que duerma al acabar la ISR
     MAP_Interrupt_enableSleepOnIsrExit();
-
     // Habilita al procesador para que responda a interrupciones
     MAP_Interrupt_enableMaster();
 
@@ -149,7 +145,6 @@ void TA0_0_IRQHandler(void)
 }
 void TA1_0_IRQHandler(void)
 {
-//    MAP_GPIO_setOutputLowOnPin(GPIO_PORT_P1, GPIO_PIN0);
     if (P1IN & GPIO_PIN1)
     {
         S1Debounce = 0;
@@ -189,7 +184,7 @@ void PORT1_IRQHandler(void)
         }
         MAP_Timer_A_startCounter(TIMER_A1_BASE, TIMER_A_UP_MODE);
     }
-    /* Handles S2 button press */
+    // Chequea si la interrupcion la genero el pin P1.4
     if (status & GPIO_PIN4)
     {
         if (S2Debounce == 0)
@@ -226,7 +221,7 @@ void TA2_0_IRQHandler(void)
 }
 void TA3_0_IRQHandler(void)
 {
-    if (countT3 < 10)
+    if (countT3 < 5)
     {
         MAP_GPIO_toggleOutputOnPin(GPIO_PORT_P2, GPIO_PIN2);
         countT3++;
