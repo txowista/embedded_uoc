@@ -55,6 +55,11 @@ extern unsigned long __STACK_END;
 extern void xPortSysTickHandler( void );
 extern void vPortSVCHandler( void );
 extern void xPortPendSVHandler( void );
+extern void EUSCIB1_IRQHandler(void);
+extern void EUSCIA0_IRQHandler(void);
+extern void TA1_0_IRQHandler (void);
+
+
 /*-----------------------------------------------------------*/
 /* Intrrupt vector table.  Note that the proper constructs must be placed on this to  */
 /* ensure that it ends up at physical address 0x0000.0000 or at the start of          */
@@ -87,18 +92,18 @@ void (* const interruptVectors[])(void) =
     defaultISR,                             /* COMP1 ISR                 */
     defaultISR,                             /* TA0_0 ISR                 */
     defaultISR,                             /* TA0_N ISR                 */
-    defaultISR,                             /* TA1_0 ISR                 */
+    TA1_0_IRQHandler,                             /* TA1_0 ISR                 */
     defaultISR,                             /* TA1_N ISR                 */
     defaultISR,                             /* TA2_0 ISR                 */
     defaultISR,                             /* TA2_N ISR                 */
     defaultISR,                             /* TA3_0 ISR                 */
     defaultISR,                             /* TA3_N ISR                 */
-    defaultISR,                             /* EUSCIA0 ISR               */
+    EUSCIA0_IRQHandler,                             /* EUSCIA0 ISR               */
     defaultISR,                             /* EUSCIA1 ISR               */
     defaultISR,                             /* EUSCIA2 ISR               */
     defaultISR,                             /* EUSCIA3 ISR               */
     defaultISR,                             /* EUSCIB0 ISR               */
-    defaultISR,                             /* EUSCIB1 ISR               */
+    EUSCIB1_IRQHandler,                             /* EUSCIB1 ISR               */
     defaultISR,                             /* EUSCIB2 ISR               */
     defaultISR,                             /* EUSCIB3 ISR               */
     defaultISR,                             /* ADC14 ISR                 */

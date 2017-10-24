@@ -13,12 +13,17 @@
 #include "temp_sensor.h"
 #include "opt3001.h"
 #include "tmp006.h"
-
+// Variables del sensor de temperatura interno
+float temperature;
+char meas_string[10];
 // Prototipos de funciones privadas
 static void prvSetupHardware(void);
+
 // Definicion de prioridades de tareas
 #define prvLED_TASK_PRIORITY    3
+#define prvREAD_TEMP_TASK_PRIORITY    2
 static void prvRedLedTask(void *pvParameters);
+static void prvReadTempTask(void *pvParameters);
 
 static void prvSetupHardware(void)
 {
@@ -53,6 +58,16 @@ static void prvSetupHardware(void)
     MAP_CS_initClockSignal(CS_MCLK, CS_DCOCLK_SELECT, CS_CLOCK_DIVIDER_1);
     MAP_CS_initClockSignal(CS_ACLK, CS_REFOCLK_SELECT, CS_CLOCK_DIVIDER_1);
 
+    MAP_GPIO_setAsPeripheralModuleFunctionOutputPin(
+            GPIO_PORT_PJ,
+            GPIO_PIN0 | GPIO_PIN1,
+            GPIO_PRIMARY_MODULE_FUNCTION);
+
+
+    // Configuracion de frecuencias de clocks externos
+    // LFXT = 32 kHz, HFXT = 48 MHz
+    CS_setExternalClockSourceFrequency(32000,48000000);
+
     // Selecciona el nivel de tension del core
     MAP_PCM_setCoreVoltageLevel(PCM_VCORE0);
 
@@ -62,12 +77,8 @@ static void prvSetupHardware(void)
     // Inicializacion de la UART
 //    UartInit(OnUart_rxChar);
 
-    // Inicializacion del sensor TMP006
+// Inicializacion del sensor TMP006
     TMP006_init();
-
-    // Inicializacion del sensor opt3001
-    sensorOpt3001Init();
-    sensorOpt3001Enable(true);
 
     // Configura el pin P1.0 como salida (LED)
     MAP_GPIO_setOutputLowOnPin(GPIO_PORT_P1, GPIO_PIN0);
@@ -86,41 +97,55 @@ static void prvSetupHardware(void)
     MAP_Interrupt_enableInterrupt(INT_PORT1);
     // Habilita que el procesador responda a las interrupciones
     MAP_Interrupt_enableMaster();
-}
 
+    // Habilita todas las interruciones
+    __enable_interrupt();
+}
 
 /**
  * main.c
  */
 void main(void)
 {
-	WDT_A->CTL = WDT_A_CTL_PW | WDT_A_CTL_HOLD;		// stop watchdog timer
+    printf("Inicializacion...\n");
     // Inicializacion del hardware (clocks, GPIOs, IRQs)
     prvSetupHardware();
+    temperature = TMP006_readAmbientTemperature();
+    // Convierte el valor de medida en cadena de caracteres
+    ftoa(temperature, meas_string, 2);
+    printf("Temperature: %s\n", meas_string);
     // Creacion de tarea RedLedTask
-    xTaskCreate( prvRedLedTask,            // Puntero a la funcion que implementa la tarea
-                "RedLedTask",              // Nombre descriptivo de la tarea
-                configMINIMAL_STACK_SIZE,  // Tama�o del stack de la tarea
-                NULL,                      // Argumentos de la tarea
-                prvLED_TASK_PRIORITY,  // Prioridad de la tarea
-                NULL );
-
+    xTaskCreate(prvRedLedTask,   // Puntero a la funcion que implementa la tarea
+            "RedLedTask",              // Nombre descriptivo de la tarea
+            configMINIMAL_STACK_SIZE,  // Tama�o del stack de la tarea
+            NULL,                      // Argumentos de la tarea
+            prvLED_TASK_PRIORITY,  // Prioridad de la tarea
+            NULL);
+    xTaskCreate(prvReadTempTask, // Puntero a la funcion que implementa la tarea
+            "ReadTempTask",              // Nombre descriptivo de la tarea
+            configMINIMAL_STACK_SIZE,  // Tama�o del stack de la tarea
+            NULL,                      // Argumentos de la tarea
+            prvREAD_TEMP_TASK_PRIORITY,  // Prioridad de la tarea
+            NULL);
     // Puesta en marcha de las tareas creadas
     vTaskStartScheduler();
+
+
 }
 // Tarea RedLedTask
-static void prvRedLedTask (void *pvParameters)
+static void prvRedLedTask(void *pvParameters)
 {
     // Calcula el tiempo de activacion del LED (en ticks)
     // a partir del tiempo en milisegundos
-    static const TickType_t xBlinkOn  = pdMS_TO_TICKS(10);
+    static const TickType_t xBlinkOn = pdMS_TO_TICKS(10);
 
     // Calcula el tiempo de desactivacion del LED (en ticks)
     // a partir del tiempo en milisegundos
     static const TickType_t xBlinkOff = pdMS_TO_TICKS(990);
 
     // La tarea se repite en un bucle infinito
-    for(;;) {
+    for (;;)
+    {
         // Fija a 1 la salida digital en pin 1.0 (LED on)
         MAP_GPIO_setOutputHighOnPin(GPIO_PORT_P1, GPIO_PIN0);
         // Bloquea la tarea durante el tiempo de on del LED
@@ -130,4 +155,19 @@ static void prvRedLedTask (void *pvParameters)
         // Bloquea la tarea durante el tiempo de off del LED
         vTaskDelay(xBlinkOff);
     }
+}
+// Tarea RedLedTask
+static void prvReadTempTask(void *pvParameters)
+{
+    static const TickType_t xReadTemp = pdMS_TO_TICKS(1000);
+    // La tarea se repite en un bucle infinito
+    for (;;)
+    {
+        // Lee el valor de la medida de temperatura
+        temperature = TMP006_readAmbientTemperature();
+        ftoa(temperature, meas_string, 2);
+        printf("Temperature: %s\n", meas_string);
+        vTaskDelay(xReadTemp);
+    }
+
 }
