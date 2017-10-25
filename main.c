@@ -6,6 +6,7 @@
 #include "FreeRTOS.h"
 #include "task.h"
 #include "queue.h"
+#include "semphr.h"
 // Includes drivers
 #include "uart_driver.h"
 #include "timer_A1.h"
@@ -15,15 +16,26 @@
 #include "tmp006.h"
 // Variables del sensor de temperatura interno
 float temperature;
-char meas_string[10];
+char temp_string[10];
+char light_string[10];
+// Variables del sensor OPT3001
+uint16_t rawData;
+float convertedLux;
+//Buffer Circular
+volatile float circular_buffer[10];
+volatile int position;
+// Declaracion de un mutex
+SemaphoreHandle_t xMutex;
 // Prototipos de funciones privadas
 static void prvSetupHardware(void);
 
 // Definicion de prioridades de tareas
-#define prvLED_TASK_PRIORITY    3
-#define prvREAD_TEMP_TASK_PRIORITY    2
+#define prvLED_TASK_PRIORITY    2
+#define prvREAD_TEMP_TASK_PRIORITY    4
+#define prvREAD_LIGHT_TASK_PRIORITY    3
 static void prvRedLedTask(void *pvParameters);
 static void prvReadTempTask(void *pvParameters);
+static void prvReadLightTask(void *pvParameters);
 
 static void prvSetupHardware(void)
 {
@@ -63,10 +75,9 @@ static void prvSetupHardware(void)
             GPIO_PIN0 | GPIO_PIN1,
             GPIO_PRIMARY_MODULE_FUNCTION);
 
-
     // Configuracion de frecuencias de clocks externos
     // LFXT = 32 kHz, HFXT = 48 MHz
-    CS_setExternalClockSourceFrequency(32000,48000000);
+    CS_setExternalClockSourceFrequency(32000, 48000000);
 
     // Selecciona el nivel de tension del core
     MAP_PCM_setCoreVoltageLevel(PCM_VCORE0);
@@ -79,6 +90,10 @@ static void prvSetupHardware(void)
 
 // Inicializacion del sensor TMP006
     TMP006_init();
+
+    // Inicializacion del sensor opt3001
+    sensorOpt3001Init();
+    sensorOpt3001Enable(true);
 
     // Configura el pin P1.0 como salida (LED)
     MAP_GPIO_setOutputLowOnPin(GPIO_PORT_P1, GPIO_PIN0);
@@ -107,29 +122,36 @@ static void prvSetupHardware(void)
  */
 void main(void)
 {
-    printf("Inicializacion...\n");
-    // Inicializacion del hardware (clocks, GPIOs, IRQs)
-    prvSetupHardware();
-    temperature = TMP006_readAmbientTemperature();
-    // Convierte el valor de medida en cadena de caracteres
-    ftoa(temperature, meas_string, 2);
-    printf("Temperature: %s\n", meas_string);
-    // Creacion de tarea RedLedTask
-    xTaskCreate(prvRedLedTask,   // Puntero a la funcion que implementa la tarea
-            "RedLedTask",              // Nombre descriptivo de la tarea
-            configMINIMAL_STACK_SIZE,  // Tama�o del stack de la tarea
-            NULL,                      // Argumentos de la tarea
-            prvLED_TASK_PRIORITY,  // Prioridad de la tarea
-            NULL);
-    xTaskCreate(prvReadTempTask, // Puntero a la funcion que implementa la tarea
-            "ReadTempTask",              // Nombre descriptivo de la tarea
-            configMINIMAL_STACK_SIZE,  // Tama�o del stack de la tarea
-            NULL,                      // Argumentos de la tarea
-            prvREAD_TEMP_TASK_PRIORITY,  // Prioridad de la tarea
-            NULL);
-    // Puesta en marcha de las tareas creadas
-    vTaskStartScheduler();
-
+//    printf("Inicializacion...\n");
+    // Inicializacion del mutex
+    xMutex = xSemaphoreCreateMutex();
+    if ((xMutex != NULL))
+    {
+        // Inicializacion del hardware (clocks, GPIOs, IRQs)
+        prvSetupHardware();
+        // Creacion de tarea RedLedTask
+        xTaskCreate(prvRedLedTask, // Puntero a la funcion que implementa la tarea
+                "RedLedTask",              // Nombre descriptivo de la tarea
+                configMINIMAL_STACK_SIZE,  // Tama�o del stack de la tarea
+                NULL,                      // Argumentos de la tarea
+                prvLED_TASK_PRIORITY,  // Prioridad de la tarea
+                NULL);
+        xTaskCreate(prvReadTempTask, // Puntero a la funcion que implementa la tarea
+                "ReadTempTask",              // Nombre descriptivo de la tarea
+                configMINIMAL_STACK_SIZE,  // Tama�o del stack de la tarea
+                NULL,                      // Argumentos de la tarea
+                prvREAD_TEMP_TASK_PRIORITY,  // Prioridad de la tarea
+                NULL);
+        xTaskCreate(prvReadLightTask, // Puntero a la funcion que implementa la tarea
+                "ReadLightTask",              // Nombre descriptivo de la tarea
+                configMINIMAL_STACK_SIZE,  // Tama�o del stack de la tarea
+                NULL,                      // Argumentos de la tarea
+                prvREAD_LIGHT_TASK_PRIORITY,  // Prioridad de la tarea
+                NULL);
+        // Puesta en marcha de las tareas creadas
+        vTaskStartScheduler();
+    }
+    return 0;
 
 }
 // Tarea RedLedTask
@@ -163,11 +185,36 @@ static void prvReadTempTask(void *pvParameters)
     // La tarea se repite en un bucle infinito
     for (;;)
     {
-        // Lee el valor de la medida de temperatura
-        temperature = TMP006_readAmbientTemperature();
-        ftoa(temperature, meas_string, 2);
-        printf("Temperature: %s\n", meas_string);
+        // Intenta coger el mutex, bloqueandose si no esta disponible
+        xSemaphoreTake(xMutex, portMAX_DELAY);
+        {
+            // Lee el valor de la medida de temperatura
+            temperature = TMP006_readAmbientTemperature();
+            ftoa(temperature, temp_string, 2);
+            xSemaphoreGive(xMutex);
+        }
         vTaskDelay(xReadTemp);
+    }
+
+}
+// Tarea RedLightTask
+static void prvReadLightTask(void *pvParameters)
+{
+    static const TickType_t xReadLight = pdMS_TO_TICKS(1000);
+    // La tarea se repite en un bucle infinito
+    for (;;)
+    {
+        // Intenta coger el mutex, bloqueandose si no esta disponible
+        xSemaphoreTake(xMutex, portMAX_DELAY);
+        {
+            // Lee el valor de la medida de temperatura
+            sensorOpt3001Read(&rawData);
+            sensorOpt3001Convert(rawData, &convertedLux);
+            ftoa(convertedLux, light_string, 2);
+            xSemaphoreGive(xMutex);
+        }
+        vTaskDelay(xReadLight);
+
     }
 
 }
