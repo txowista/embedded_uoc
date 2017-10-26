@@ -1,6 +1,7 @@
 // Includes standard
 #include <stdio.h>
 #include <stdint.h>
+#include <stdlib.h>
 
 // Includes FreeRTOS
 #include "FreeRTOS.h"
@@ -22,8 +23,18 @@ char light_string[10];
 uint16_t rawData;
 float convertedLux;
 //Buffer Circular
-volatile float circular_buffer[10];
-volatile int position;
+typedef struct {
+    float cbValue[10];
+    int postion;
+} circularBuffer;
+circularBuffer cbTemperature={
+    {0.0f},0
+};
+circularBuffer cbLight={
+    {0.0f},0
+};
+
+
 // Declaracion de un mutex
 SemaphoreHandle_t xMutex;
 // Prototipos de funciones privadas
@@ -36,6 +47,7 @@ static void prvSetupHardware(void);
 static void prvRedLedTask(void *pvParameters);
 static void prvReadTempTask(void *pvParameters);
 static void prvReadLightTask(void *pvParameters);
+static void writeCircularBuffer(circularBuffer *cb,float value);
 
 static void prvSetupHardware(void)
 {
@@ -125,6 +137,7 @@ void main(void)
 //    printf("Inicializacion...\n");
     // Inicializacion del mutex
     xMutex = xSemaphoreCreateMutex();
+
     if ((xMutex != NULL))
     {
         // Inicializacion del hardware (clocks, GPIOs, IRQs)
@@ -154,6 +167,7 @@ void main(void)
     return 0;
 
 }
+
 // Tarea RedLedTask
 static void prvRedLedTask(void *pvParameters)
 {
@@ -190,7 +204,7 @@ static void prvReadTempTask(void *pvParameters)
         {
             // Lee el valor de la medida de temperatura
             temperature = TMP006_readAmbientTemperature();
-            ftoa(temperature, temp_string, 2);
+            if(temperature!=0)writeCircularBuffer(&cbTemperature,temperature);
             xSemaphoreGive(xMutex);
         }
         vTaskDelay(xReadTemp);
@@ -210,11 +224,16 @@ static void prvReadLightTask(void *pvParameters)
             // Lee el valor de la medida de temperatura
             sensorOpt3001Read(&rawData);
             sensorOpt3001Convert(rawData, &convertedLux);
-            ftoa(convertedLux, light_string, 2);
+            if(convertedLux!=0)writeCircularBuffer(&cbLight,convertedLux);
             xSemaphoreGive(xMutex);
         }
         vTaskDelay(xReadLight);
 
     }
+
+}
+static void writeCircularBuffer(circularBuffer *cb,float value){
+        cb->cbValue[cb->postion] = value;
+        cb->postion = cb->postion < 9 ? cb->postion+1 : 0;
 
 }
