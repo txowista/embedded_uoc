@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 // Includes FreeRTOS
 #include "FreeRTOS.h"
@@ -15,6 +16,10 @@
 #include "temp_sensor.h"
 #include "opt3001.h"
 #include "tmp006.h"
+#define prvLED_TASK_PRIORITY    1
+#define prvREAD_TEMP_TASK_PRIORITY    2
+#define prvREAD_LIGHT_TASK_PRIORITY    2
+#define prvWRITE_SERIAL_TASK_PRIORITY    4
 // Variables del sensor de temperatura interno
 float temperature;
 char temp_string[10];
@@ -23,36 +28,32 @@ char light_string[10];
 uint16_t rawData;
 float convertedLux;
 //Buffer Circular
-typedef struct {
+typedef struct
+{
     float cbValue[10];
     int postion;
 } circularBuffer;
-circularBuffer cbTemperature={
-    {0.0f},0
-};
-circularBuffer cbLight={
-    {0.0f},0
-};
+circularBuffer cbTemperature = { { 0.0f }, 0 };
+circularBuffer cbLight = { { 0.0f }, 0 };
 // Declaracion de un semaforo binario
 SemaphoreHandle_t xBinarySemaphore;
 // Declaracion de un mutex
 SemaphoreHandle_t xMutex;
+volatile unsigned int S1Debounce = 0; // Deboounce state for button S1
+
 // Prototipos de funciones privadas
 static void prvSetupHardware(void);
 
 // Definicion de prioridades de tareas
-#define prvLED_TASK_PRIORITY    1
-#define prvREAD_TEMP_TASK_PRIORITY    2
-#define prvREAD_LIGHT_TASK_PRIORITY    2
-#define prvWRITE_SERIAL_TASK_PRIORITY    4
 
 static void prvRedLedTask(void *pvParameters);
 static void prvReadTempTask(void *pvParameters);
 static void prvReadLightTask(void *pvParameters);
 static void prvWriteSerialTask(void *pvParameters);
-static void writeCircularBuffer(circularBuffer *cb,float value);
-void OnUart_rxChar( void );
+static void writeCircularBuffer(circularBuffer *cb, float value);
 static void writeSerial();
+void OnUart_rxChar(void);
+void OnTimerA1Event(void);
 
 static void prvSetupHardware(void)
 {
@@ -111,6 +112,8 @@ static void prvSetupHardware(void)
     // Inicializacion del sensor opt3001
     sensorOpt3001Init();
     sensorOpt3001Enable(true);
+    // Inicializacion del Timer A
+    timerA1Init(OnTimerA1Event);
 
     // Configura el pin P1.0 como salida (LED)
     MAP_GPIO_setOutputLowOnPin(GPIO_PORT_P1, GPIO_PIN0);
@@ -168,7 +171,7 @@ void main(void)
                 prvREAD_LIGHT_TASK_PRIORITY,  // Prioridad de la tarea
                 NULL);
         xTaskCreate(prvWriteSerialTask, // Puntero a la funcion que implementa la tarea
-                "WriteSerialTask",              // Nombre descriptivo de la tarea
+                "WriteSerialTask",             // Nombre descriptivo de la tarea
                 configMINIMAL_STACK_SIZE,  // Tama�o del stack de la tarea
                 NULL,                      // Argumentos de la tarea
                 prvREAD_LIGHT_TASK_PRIORITY,  // Prioridad de la tarea
@@ -216,7 +219,8 @@ static void prvReadTempTask(void *pvParameters)
         {
             // Lee el valor de la medida de temperatura
             temperature = TMP006_readAmbientTemperature();
-            if(temperature!=0)writeCircularBuffer(&cbTemperature,temperature);
+            if (temperature != 0)
+                writeCircularBuffer(&cbTemperature, temperature);
             xSemaphoreGive(xMutex);
         }
         vTaskDelay(xReadTemp);
@@ -236,7 +240,8 @@ static void prvReadLightTask(void *pvParameters)
             // Lee el valor de la medida de temperatura
             sensorOpt3001Read(&rawData);
             sensorOpt3001Convert(rawData, &convertedLux);
-            if(convertedLux!=0)writeCircularBuffer(&cbLight,convertedLux);
+            if (convertedLux != 0)
+                writeCircularBuffer(&cbLight, convertedLux);
             xSemaphoreGive(xMutex);
         }
         vTaskDelay(xReadLight);
@@ -247,26 +252,28 @@ static void prvReadLightTask(void *pvParameters)
 static void prvWriteSerialTask(void *pvParameters)
 {
     // Tiempo maximo de espera entre dos interrupciones del pulsador
-    const TickType_t xMaxExpectedBlockTime = pdMS_TO_TICKS( 500 );
+    const TickType_t xMaxExpectedBlockTime = pdMS_TO_TICKS(500);
 
     // La tarea se repite en un bucle infinito
-    for(;;) {
+    for (;;)
+    {
         // El semaforo debe ser entregado por la ISR PORT1_IRQHandler
         // Espera un numero maximo de xMaxExpectedBlockTime ticks
-        if( xSemaphoreTake( xBinarySemaphore, xMaxExpectedBlockTime ) == pdPASS )
+        if ( xSemaphoreTake( xBinarySemaphore, xMaxExpectedBlockTime ) == pdPASS)
         {
             // Intenta coger el mutex, bloqueandose si no esta disponible
-            xSemaphoreTake( xMutex, portMAX_DELAY );
+            xSemaphoreTake(xMutex, portMAX_DELAY);
             {
                 writeSerial();
             }
             // Libera el mutex
-            xSemaphoreGive( xMutex );
+            xSemaphoreGive(xMutex);
         }
     }
 
 }
-static void writeSerial(){
+static void writeSerial()
+{
     int reciente = 0;
     reciente = cbTemperature.postion > 0 ? cbTemperature.postion - 1 : 9;
     // Convierte el valor de medida en cadena de caracteres
@@ -283,9 +290,10 @@ static void writeSerial(){
     UartPrint(light_string);
 
 }
-static void writeCircularBuffer(circularBuffer *cb,float value){
-        cb->cbValue[cb->postion] = value;
-        cb->postion = cb->postion < 9 ? cb->postion+1 : 0;
+static void writeCircularBuffer(circularBuffer *cb, float value)
+{
+    cb->cbValue[cb->postion] = value;
+    cb->postion = cb->postion < 9 ? cb->postion + 1 : 0;
 
 }
 // Rutina de Servicio a Interrupcion (ISR) del PORT1
@@ -300,30 +308,46 @@ void PORT1_IRQHandler(void)
     MAP_GPIO_clearInterruptFlag(GPIO_PORT_P1, status);
 
     // Chequea si la interrupcion la genero el pin P1.1
-    if(status & GPIO_PIN1)
+    if (status & GPIO_PIN1)
     {
-        // El parametro xHigherPriorityTaskWoken debe inicializarse
-        // en pdFALSE, ya que se establecera en pdTRUE dentro de la
-        // funcion API de interrupcion segura si se requiere un cambio
-        // de contexto
-        xHigherPriorityTaskWoken = pdFALSE;
-        // Entrega el semaforo para desbloquear la tarea SenderTask
-        xSemaphoreGiveFromISR(xBinarySemaphore,
-                &xHigherPriorityTaskWoken);
+        if (S1Debounce == 0)
+        {
+            S1Debounce = 1;
+            // El parametro xHigherPriorityTaskWoken debe inicializarse
+            // en pdFALSE, ya que se establecera en pdTRUE dentro de la
+            // funcion API de interrupcion segura si se requiere un cambio
+            // de contexto
+            xHigherPriorityTaskWoken = pdFALSE;
+            // Entrega el semaforo para desbloquear la tarea SenderTask
+            xSemaphoreGiveFromISR(xBinarySemaphore, &xHigherPriorityTaskWoken);
 
-        // Pasa xHigherPriorityTaskWoken en portYIELD_FROM_ISR().
-        // Si xHigherPriorityTaskWoken valia pdTRUE dentro de
-        // xSemaphoreGiveFromISR(), entonces al llamar a
-        // portYIELD_FROM_ISR() solicitara un cambio de contexto.
-        // Si xHigherPriorityTaskWoken sigue siendo pdFALSE, la llamada
-        // a portYIELD_FROM_ISR() no tendra ningun efecto
-        portYIELD_FROM_ISR( xHigherPriorityTaskWoken );
+            // Pasa xHigherPriorityTaskWoken en portYIELD_FROM_ISR().
+            // Si xHigherPriorityTaskWoken valia pdTRUE dentro de
+            // xSemaphoreGiveFromISR(), entonces al llamar a
+            // portYIELD_FROM_ISR() solicitara un cambio de contexto.
+            // Si xHigherPriorityTaskWoken sigue siendo pdFALSE, la llamada
+            // a portYIELD_FROM_ISR() no tendra ningun efecto
+            portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+        }
+        MAP_Timer_A_startCounter(TIMER_A1_BASE, TIMER_A_UP_MODE);
     }
 }
 // Funcion call-back ejecutada al recibir caracter en UART
-void OnUart_rxChar( void )
+void OnUart_rxChar(void)
 {
     char data;
     // Lee el caracter recibido en la UART
     UartGetChar(&data);
+}
+// Funcion call-back ejecutada cuando dispara el Timer A
+void OnTimerA1Event(void)
+{
+    if (P1IN & GPIO_PIN1)
+    {
+        S1Debounce = 0;
+        MAP_Timer_A_stopTimer(TIMER_A1_BASE);
+    }
+    MAP_Timer_A_clearCaptureCompareInterrupt(TIMER_A1_BASE,
+    TIMER_A_CAPTURECOMPARE_REGISTER_0);
+
 }
