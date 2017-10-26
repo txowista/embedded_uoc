@@ -58,6 +58,8 @@ extern void xPortPendSVHandler( void );
 extern void EUSCIB1_IRQHandler(void);
 extern void EUSCIA0_IRQHandler(void);
 extern void TA1_0_IRQHandler (void);
+/* External declarations for the interrupt handlers used by the application. */
+extern void PORT1_IRQHandler (void);
 
 
 /*-----------------------------------------------------------*/
@@ -117,7 +119,7 @@ void (* const interruptVectors[])(void) =
     defaultISR,                             /* DMA_INT2 ISR              */
     defaultISR,                             /* DMA_INT1 ISR              */
     defaultISR,                             /* DMA_INT0 ISR              */
-    defaultISR,                             /* PORT1 ISR                 */
+    PORT1_IRQHandler,                             /* PORT1 ISR                 */
     defaultISR,                             /* PORT2 ISR                 */
     defaultISR,                             /* PORT3 ISR                 */
     defaultISR,                             /* PORT4 ISR                 */

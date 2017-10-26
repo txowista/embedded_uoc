@@ -33,21 +33,26 @@ circularBuffer cbTemperature={
 circularBuffer cbLight={
     {0.0f},0
 };
-
-
+// Declaracion de un semaforo binario
+SemaphoreHandle_t xBinarySemaphore;
 // Declaracion de un mutex
 SemaphoreHandle_t xMutex;
 // Prototipos de funciones privadas
 static void prvSetupHardware(void);
 
 // Definicion de prioridades de tareas
-#define prvLED_TASK_PRIORITY    2
-#define prvREAD_TEMP_TASK_PRIORITY    4
-#define prvREAD_LIGHT_TASK_PRIORITY    3
+#define prvLED_TASK_PRIORITY    1
+#define prvREAD_TEMP_TASK_PRIORITY    2
+#define prvREAD_LIGHT_TASK_PRIORITY    2
+#define prvWRITE_SERIAL_TASK_PRIORITY    4
+
 static void prvRedLedTask(void *pvParameters);
 static void prvReadTempTask(void *pvParameters);
 static void prvReadLightTask(void *pvParameters);
+static void prvWriteSerialTask(void *pvParameters);
 static void writeCircularBuffer(circularBuffer *cb,float value);
+void OnUart_rxChar( void );
+static void writeSerial();
 
 static void prvSetupHardware(void)
 {
@@ -72,9 +77,9 @@ static void prvSetupHardware(void)
     MAP_FlashCtl_setWaitState(FLASH_BANK1, 2);
 
     // Selecciona la frecuencia central de un rango de frecuencias del DCO
-    MAP_CS_setDCOCenteredFrequency(CS_DCO_FREQUENCY_6);
+    MAP_CS_setDCOCenteredFrequency(CS_DCO_FREQUENCY_12);
     // Configura la frecuencia del DCO
-    CS_setDCOFrequency(8000000);
+//    CS_setDCOFrequency(8000000);
 
     // Inicializa los clocks HSMCLK, SMCLK, MCLK y ACLK
     MAP_CS_initClockSignal(CS_HSMCLK, CS_DCOCLK_SELECT, CS_CLOCK_DIVIDER_1);
@@ -98,9 +103,9 @@ static void prvSetupHardware(void)
     I2C_init();
 
     // Inicializacion de la UART
-//    UartInit(OnUart_rxChar);
+    UartInit(OnUart_rxChar);
 
-// Inicializacion del sensor TMP006
+    // Inicializacion del sensor TMP006
     TMP006_init();
 
     // Inicializacion del sensor opt3001
@@ -134,11 +139,12 @@ static void prvSetupHardware(void)
  */
 void main(void)
 {
-//    printf("Inicializacion...\n");
     // Inicializacion del mutex
     xMutex = xSemaphoreCreateMutex();
+    // Inicializacion del semaforo binario
+    xBinarySemaphore = xSemaphoreCreateBinary();
 
-    if ((xMutex != NULL))
+    if ((xBinarySemaphore != NULL) && (xMutex != NULL))
     {
         // Inicializacion del hardware (clocks, GPIOs, IRQs)
         prvSetupHardware();
@@ -157,6 +163,12 @@ void main(void)
                 NULL);
         xTaskCreate(prvReadLightTask, // Puntero a la funcion que implementa la tarea
                 "ReadLightTask",              // Nombre descriptivo de la tarea
+                configMINIMAL_STACK_SIZE,  // Tama�o del stack de la tarea
+                NULL,                      // Argumentos de la tarea
+                prvREAD_LIGHT_TASK_PRIORITY,  // Prioridad de la tarea
+                NULL);
+        xTaskCreate(prvWriteSerialTask, // Puntero a la funcion que implementa la tarea
+                "WriteSerialTask",              // Nombre descriptivo de la tarea
                 configMINIMAL_STACK_SIZE,  // Tama�o del stack de la tarea
                 NULL,                      // Argumentos de la tarea
                 prvREAD_LIGHT_TASK_PRIORITY,  // Prioridad de la tarea
@@ -232,8 +244,86 @@ static void prvReadLightTask(void *pvParameters)
     }
 
 }
+static void prvWriteSerialTask(void *pvParameters)
+{
+    // Tiempo maximo de espera entre dos interrupciones del pulsador
+    const TickType_t xMaxExpectedBlockTime = pdMS_TO_TICKS( 500 );
+
+    // La tarea se repite en un bucle infinito
+    for(;;) {
+        // El semaforo debe ser entregado por la ISR PORT1_IRQHandler
+        // Espera un numero maximo de xMaxExpectedBlockTime ticks
+        if( xSemaphoreTake( xBinarySemaphore, xMaxExpectedBlockTime ) == pdPASS )
+        {
+            // Intenta coger el mutex, bloqueandose si no esta disponible
+            xSemaphoreTake( xMutex, portMAX_DELAY );
+            {
+                writeSerial();
+            }
+            // Libera el mutex
+            xSemaphoreGive( xMutex );
+        }
+    }
+
+}
+static void writeSerial(){
+    int reciente = 0;
+    reciente = cbTemperature.postion > 0 ? cbTemperature.postion - 1 : 9;
+    // Convierte el valor de medida en cadena de caracteres
+    ftoa(cbTemperature.cbValue[reciente], temp_string, 2);
+    // Envia el valor de la medida a la UART
+    UartPrint("Temperature = ");
+    strcat(temp_string, " \n\r");
+    UartPrint(temp_string);
+
+    reciente = cbLight.postion > 0 ? cbLight.postion - 1 : 9;
+    ftoa(cbLight.cbValue[reciente], light_string, 2);
+    UartPrint("Light = ");
+    strcat(light_string, " \n\r");
+    UartPrint(light_string);
+
+}
 static void writeCircularBuffer(circularBuffer *cb,float value){
         cb->cbValue[cb->postion] = value;
         cb->postion = cb->postion < 9 ? cb->postion+1 : 0;
 
+}
+// Rutina de Servicio a Interrupcion (ISR) del PORT1
+void PORT1_IRQHandler(void)
+{
+    uint32_t status;
+    static BaseType_t xHigherPriorityTaskWoken;
+
+    // Lee el estado de la interrupcion generada por GPIO_PORT_P1
+    status = MAP_GPIO_getEnabledInterruptStatus(GPIO_PORT_P1);
+    // Reset del flag de interrupcion del pin que la genera
+    MAP_GPIO_clearInterruptFlag(GPIO_PORT_P1, status);
+
+    // Chequea si la interrupcion la genero el pin P1.1
+    if(status & GPIO_PIN1)
+    {
+        // El parametro xHigherPriorityTaskWoken debe inicializarse
+        // en pdFALSE, ya que se establecera en pdTRUE dentro de la
+        // funcion API de interrupcion segura si se requiere un cambio
+        // de contexto
+        xHigherPriorityTaskWoken = pdFALSE;
+        // Entrega el semaforo para desbloquear la tarea SenderTask
+        xSemaphoreGiveFromISR(xBinarySemaphore,
+                &xHigherPriorityTaskWoken);
+
+        // Pasa xHigherPriorityTaskWoken en portYIELD_FROM_ISR().
+        // Si xHigherPriorityTaskWoken valia pdTRUE dentro de
+        // xSemaphoreGiveFromISR(), entonces al llamar a
+        // portYIELD_FROM_ISR() solicitara un cambio de contexto.
+        // Si xHigherPriorityTaskWoken sigue siendo pdFALSE, la llamada
+        // a portYIELD_FROM_ISR() no tendra ningun efecto
+        portYIELD_FROM_ISR( xHigherPriorityTaskWoken );
+    }
+}
+// Funcion call-back ejecutada al recibir caracter en UART
+void OnUart_rxChar( void )
+{
+    char data;
+    // Lee el caracter recibido en la UART
+    UartGetChar(&data);
 }
