@@ -14,9 +14,19 @@
 
 volatile uint8_t ADC_reading_available;
 
+typedef struct
+{
+    float x;
+    float y;
+    float z;
+} axis;
+
+axis readAxis;
+
 extern void init_ADC(void); //uses interrupt ISR ADC14_IRQHandler
 
-extern uint16_t *ADC_read(void);
+extern axis *ADC_read(void);
+
 
 
 
