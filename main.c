@@ -9,7 +9,7 @@
 #include "semphr.h"
 #include "adc14_multiple_channel_no_repeat.h"
 #define prvLED_TASK_PRIORITY    1
-#define READER_TASK_PRIORITY    2
+#define READER_TASK_PRIORITY    4
 #define UART_WRITER_TASK_PRIORITY    3
 #define DELAY_100_MS     100
 #define DELAY_500_MS     500
@@ -188,9 +188,10 @@ static void prvSetupHardware(void)
     // Habilitacion de la UART
     MAP_UART_enableModule(EUSCI_A0_BASE);
     //Inicializa ADC
-    init_ADC();
+    init_ADC(&xBinarySemaphore);
     // Habilita que el procesador responda a las interrupciones
     MAP_Interrupt_enableMaster();
+
 
 }
 /**
@@ -256,15 +257,23 @@ static void prvRedLedTask(void *pvParameters)
 // Tarea ReaderTask
 static void prvReaderTask(void *pvParameters)
 {
+    // Tiempo maximo de espera entre dos interrupciones
+    const TickType_t xMaxExpectedBlockTime = pdMS_TO_TICKS(500);
     for (;;)
     {
         axis *readAxis;
         readAxis = ADC_read();
-        while (!ADC_reading_available);
-        xQueueSendToBack(xQueue, readAxis, 0);
-        vTaskDelay(pdMS_TO_TICKS(DELAY_100_MS));
+        // El semaforo debe ser entregado por la ISR PORT1_IRQHandler
+        // Espera un numero maximo de xMaxExpectedBlockTime ticks
+        if ( xSemaphoreTake( xBinarySemaphore, xMaxExpectedBlockTime ) == pdPASS)
+        {
+          xQueueSendToBack(xQueue, readAxis, 0);
+          vTaskDelay(pdMS_TO_TICKS(DELAY_100_MS));
+        }
+
     }
 }
+
 // Tarea UARTWRITERTask
 static void prvUartWriterTask(void *pvParameters)
 {
@@ -289,17 +298,4 @@ static void prvUartWriterTask(void *pvParameters)
         printf_(EUSCI_A0_BASE, "g\n\r");
         vTaskDelay(pdMS_TO_TICKS(DELAY_500_MS));
     }
-}
-
-void my_ISR_ADC14(void)
-{
-    uint64_t status;
-//    static BaseType_t xHigherPriorityTaskWoken;
-
-
-//        xHigherPriorityTaskWoken = pdFALSE;
-//        xSemaphoreGiveFromISR(xBinarySemaphore, &xHigherPriorityTaskWoken);
-//        portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
-
-
 }

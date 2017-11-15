@@ -66,11 +66,11 @@
 #include <string.h>
 
 uint16_t resultsBuffer[NUM_ADC_CHANNELS];
-#define myISR 64
-void init_ADC(void){
+
+void init_ADC(SemaphoreHandle_t *xBinarySemaphore){
 
     ADC_reading_available = 0;
-
+    xBinarySemaphoreADC=xBinarySemaphore;
     /* Zero-filling buffer */
     memset(resultsBuffer, 0x00, NUM_ADC_CHANNELS);
 
@@ -102,6 +102,8 @@ void init_ADC(void){
 
     /* Enabling Interrupts */
     MAP_Interrupt_enableInterrupt(INT_ADC14);
+    Interrupt_setPriority(INT_ADC14, 160);
+
     //MAP_Interrupt_enableMaster();
 
     /* Setting up the sample timer to automatically step through the sequence
@@ -117,7 +119,7 @@ axis *ADC_read(void){
     MAP_ADC14_toggleConversionTrigger();
     return &readAxis;
 }
-static void convertBuffer(void){
+void convertBuffer(void){
     readAxis.x = ((float) resultsBuffer[0] / 2730) - 3;
     readAxis.y = ((float) resultsBuffer[1] / 2730) - 3;
     readAxis.z = ((float) resultsBuffer[2] / 2730) - 3;
@@ -128,20 +130,17 @@ static void convertBuffer(void){
 void ADC14_IRQHandler(void)
 {
     uint64_t status;
-//    static BaseType_t xHigherPriorityTaskWoken;
-
+    static BaseType_t xHigherPriorityTaskWoken;
     status = MAP_ADC14_getEnabledInterruptStatus();
     MAP_ADC14_clearInterruptFlag(status);
-
     if(status & ADC_INT2)
     {
         MAP_ADC14_getMultiSequenceResult(resultsBuffer);
         convertBuffer();
-        ADC_reading_available = 1;
-//        vPortGenerateSimulatedInterrupt( myISR );
-//        xHigherPriorityTaskWoken = pdFALSE;
-//        xSemaphoreGiveFromISR(xBinarySemaphore, &xHigherPriorityTaskWoken);
-//        portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+        xHigherPriorityTaskWoken = pdFALSE;
+        xSemaphoreGiveFromISR(*xBinarySemaphoreADC,
+                &xHigherPriorityTaskWoken);
+        portYIELD_FROM_ISR( xHigherPriorityTaskWoken );
     }
 
 }

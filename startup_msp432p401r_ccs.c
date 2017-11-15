@@ -57,7 +57,7 @@ extern void vPortSVCHandler( void );
 extern void xPortPendSVHandler( void );
 /* External declarations for the interrupt handlers used by the application. */
 extern void ADC14_IRQHandler(void);
-extern void my_ISR_ADC14(void);
+
 
 
 
@@ -147,7 +147,7 @@ void (* const interruptVectors[])(void) =
     defaultISR,                             /* Reserved 61               */
     defaultISR,                             /* Reserved 62               */
     defaultISR,                             /* Reserved 63               */
-    my_ISR_ADC14                              /* Reserved 64               */
+    defaultISR                              /* Reserved 64               */
 };
 
 /*-----------------------------------------------------------*/
