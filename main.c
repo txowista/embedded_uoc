@@ -1,20 +1,25 @@
 // Includes standard
 #include <stdio.h>
 #include <stdint.h>
-#include "math.h"
+#include <string.h>
+#include "util.h"
 // Includes FreeRTOS
 #include "FreeRTOS.h"
 #include "task.h"
 #include "queue.h"
 #include "semphr.h"
 #include "adc14_multiple_channel_no_repeat.h"
-#define prvLED_TASK_PRIORITY    1
-#define READER_TASK_PRIORITY    4
-#define UART_WRITER_TASK_PRIORITY    3
+#define HEARTBEAT_TASK_PRIORITY    1
+#define READER_TASK_PRIORITY    2
+#define UART_WRITER_TASK_PRIORITY    1
 #define DELAY_100_MS     100
 #define DELAY_500_MS     500
+#define QUEUE_SIZE  10
+#define HEART_BEAT_ON_MS 10
+#define HEART_BEAT_OFF_MS 990
 // Declaracion de un semaforo binario
 SemaphoreHandle_t xBinarySemaphore;
+SemaphoreHandle_t xMutexUART;
 // UART Configuration Parameter (9600 bps - clock 8MHz)
 const eUSCI_UART_Config uartConfig = {
 EUSCI_A_UART_CLOCKSOURCE_SMCLK,          // SMCLK Clock Source
@@ -37,106 +42,9 @@ void printf_(uint32_t moduleInstance, char *message)
         index++;
     }
 }
-
-//funcion pasar uint a char[x]
-void uinttochar(char* a, uint32_t n)
-{
-    if (n == 0)
-    {
-        *a = '0';
-        *(a + 1) = '\0';
-        return;
-    }
-
-    char aux[20];
-    aux[19] = '\0';
-    char* auxp = aux + 19;
-
-    int c = 1;
-    while (n != 0)
-    {
-        int mod = n % 10;
-        *(--auxp) = mod | 0x30;
-        n /= 10;
-        c++;
-    }
-
-    memcpy(a, auxp, c);
-}
-/* Reverses a string 'str' of length 'len' */
-void reverse(char *str, int len)
-{
-    int i = 0, j = len - 1, temp;
-    while (i < j)
-
-    {
-        temp = str[i];
-        str[i] = str[j];
-        str[j] = temp;
-        i++;
-        j--;
-    }
-}
-/* Converts a given integer x to string str[].  d is the number
- of digits required in output. If d is more than the number
- of digits in x, then 0s are added at the beginning */
-int intToStr(int x, char str[], int d)
-{
-    int i = 0;
-    while (x)
-    {
-        str[i++] = (x % 10) + '0';
-        x = x / 10;
-    }
-
-    /* If number of digits required is more, then add 0s at the beginning */
-    while (i < d)
-        str[i++] = '0';
-
-    reverse(str, i);
-    str[i] = '\0';
-    return i;
-}
-/* Converts a floating point number to string. */
-void ftoa(float n, char *res, int afterpoint)
-{
-    /* Extract integer part */
-    int negativo = 0;
-    if (n < 0)
-    {
-        n *= -1;
-        negativo = 1;
-        res[0] = '-';
-    }
-    int ipart = (int) n;
-
-    /* Extract floating part */
-    float fpart = n - (float) ipart;
-
-    /* convert integer part to string */
-    int i = intToStr(ipart, res + negativo, 0);
-    if (i == 0)
-    {
-        res[negativo] = '0';
-        i++;
-    }
-    i += negativo;
-    /* check for display option after point */
-    if (afterpoint != 0)
-    {
-        res[i] = '.'; /* add dot */
-
-        /*  Get the value of fraction part upto given no.
-         of points after dot. The third parameter is needed
-         to handle cases like 233.007 */
-        fpart = fpart * pow(10, afterpoint);
-
-        intToStr((int) fpart, res + i + 1, afterpoint);
-    }
-}
 // Prototipos de funciones privadas
 static void prvSetupHardware(void);
-static void prvRedLedTask(void *pvParameters);
+static void prvHeartBeatTask(void *pvParameters);
 static void prvReaderTask(void *pvParameters);
 static void prvUartWriterTask(void *pvParameters);
 uint16_t *Data;
@@ -164,9 +72,9 @@ static void prvSetupHardware(void)
     MAP_FlashCtl_setWaitState(FLASH_BANK1, 2);
 
     // Selecciona la frecuencia central de un rango de frecuencias del DCO
-    MAP_CS_setDCOCenteredFrequency(CS_DCO_FREQUENCY_12);
+    MAP_CS_setDCOCenteredFrequency(CS_DCO_FREQUENCY_6);
     // Configura la frecuencia del DCO
-    CS_setDCOFrequency(8000000);
+    CS_setDCOFrequency(CS_8MHZ);
 
     // Inicializa los clocks HSMCLK, SMCLK, MCLK y ACLK
     MAP_CS_initClockSignal(CS_HSMCLK, CS_DCOCLK_SELECT, CS_CLOCK_DIVIDER_1);
@@ -192,7 +100,6 @@ static void prvSetupHardware(void)
     // Habilita que el procesador responda a las interrupciones
     MAP_Interrupt_enableMaster();
 
-
 }
 /**
  * main.c
@@ -201,17 +108,18 @@ void main(void)
 {
     // Inicializacion del semaforo binario
     xBinarySemaphore = xSemaphoreCreateBinary();
-    if ((xBinarySemaphore != NULL))
+    xMutexUART = xSemaphoreCreateMutex();
+    if ((xBinarySemaphore != NULL) && (xMutexUART != NULL))
     {
         // Inicializacion del hardware (clocks, GPIOs, IRQs)
         prvSetupHardware();
-        xQueue = xQueueCreate(10, sizeof(axis));
+        xQueue = xQueueCreate(QUEUE_SIZE, sizeof(axis));
         // Creacion de tarea RedLedTask
-        xTaskCreate(prvRedLedTask, // Puntero a la funcion que implementa la tarea
-                "RedLedTask",              // Nombre descriptivo de la tarea
+        xTaskCreate(prvHeartBeatTask, // Puntero a la funcion que implementa la tarea
+                "HeartBeatTask",              // Nombre descriptivo de la tarea
                 configMINIMAL_STACK_SIZE,  // Tama�o del stack de la tarea
                 NULL,                      // Argumentos de la tarea
-                prvLED_TASK_PRIORITY,  // Prioridad de la tarea
+                HEARTBEAT_TASK_PRIORITY,  // Prioridad de la tarea
                 NULL);
         // Creacion de tarea ReaderTask
         xTaskCreate(prvReaderTask, "ReaderTask",
@@ -231,27 +139,14 @@ void main(void)
     return 0;
 }
 // Tarea RedLedTask
-static void prvRedLedTask(void *pvParameters)
+static void prvHeartBeatTask(void *pvParameters)
 {
-    // Calcula el tiempo de activacion del LED (en ticks)
-    // a partir del tiempo en milisegundos
-    static const TickType_t xBlinkOn = pdMS_TO_TICKS(10);
-
-    // Calcula el tiempo de desactivacion del LED (en ticks)
-    // a partir del tiempo en milisegundos
-    static const TickType_t xBlinkOff = pdMS_TO_TICKS(990);
-
-    // La tarea se repite en un bucle infinito
     for (;;)
     {
-        // Fija a 1 la salida digital en pin 1.0 (LED on)
-        MAP_GPIO_setOutputHighOnPin(GPIO_PORT_P1, GPIO_PIN0);
-        // Bloquea la tarea durante el tiempo de on del LED
-        vTaskDelay(xBlinkOn);
-        // Fija a 0 la salida digital en pin 1.0 (LED off)
-        MAP_GPIO_setOutputLowOnPin(GPIO_PORT_P1, GPIO_PIN0);
-        // Bloquea la tarea durante el tiempo de off del LED
-        vTaskDelay(xBlinkOff);
+        MAP_GPIO_toggleOutputOnPin(GPIO_PORT_P1, GPIO_PIN0);
+        vTaskDelay(pdMS_TO_TICKS(HEART_BEAT_ON_MS));
+        MAP_GPIO_toggleOutputOnPin(GPIO_PORT_P1, GPIO_PIN0);
+        vTaskDelay(pdMS_TO_TICKS(HEART_BEAT_OFF_MS));
     }
 }
 // Tarea ReaderTask
@@ -263,12 +158,10 @@ static void prvReaderTask(void *pvParameters)
     {
         axis *readAxis;
         readAxis = ADC_read();
-        // El semaforo debe ser entregado por la ISR PORT1_IRQHandler
-        // Espera un numero maximo de xMaxExpectedBlockTime ticks
         if ( xSemaphoreTake( xBinarySemaphore, xMaxExpectedBlockTime ) == pdPASS)
         {
-          xQueueSendToBack(xQueue, readAxis, 0);
-          vTaskDelay(pdMS_TO_TICKS(DELAY_100_MS));
+            xQueueSendToBack(xQueue, readAxis, portMAX_DELAY);
+            vTaskDelay(pdMS_TO_TICKS(DELAY_100_MS));
         }
 
     }
@@ -278,24 +171,25 @@ static void prvReaderTask(void *pvParameters)
 static void prvUartWriterTask(void *pvParameters)
 {
     char num[20];
-    const portTickType xTicksToWait = 100 / portTICK_RATE_MS;
+    char message[100];
     for (;;)
     {
         axis writeAxis;
-        xQueueReceive(xQueue, &writeAxis, xTicksToWait);
-        printf_(EUSCI_A0_BASE, "\n\r");
-        ftoa(writeAxis.x, num, 2);
-        printf_(EUSCI_A0_BASE, "AccX: ");
-        printf_(EUSCI_A0_BASE, num);
-        printf_(EUSCI_A0_BASE, "g\n\r");
-        ftoa(writeAxis.y, num, 2);
-        printf_(EUSCI_A0_BASE, "AccY: ");
-        printf_(EUSCI_A0_BASE, num);
-        printf_(EUSCI_A0_BASE, "g\n\r");
-        ftoa(writeAxis.z, num, 2);
-        printf_(EUSCI_A0_BASE, "AccZ: ");
-        printf_(EUSCI_A0_BASE, num);
-        printf_(EUSCI_A0_BASE, "g\n\r");
+        while (xQueueReceive(xQueue, &writeAxis, 0))
+        {
+            strcpy(message, "\nAcelaracion en eje X: ");
+            ftoa(writeAxis.x, num, 1);
+            strcat(message, num);
+            strcat(message, "g\n\rAcelaracion en eje Y: ");
+            ftoa(writeAxis.y, num, 1);
+            strcat(message, num);
+            strcat(message, "g\n\rAcelaracion en eje Z: ");
+            ftoa(writeAxis.z, num, 1);
+            strcat(strcat(message, num), "g\n\r");
+            xSemaphoreTake(xMutexUART,portMAX_DELAY);
+            printf_(EUSCI_A0_BASE, message);
+            xSemaphoreGive(xMutexUART);
+        }
         vTaskDelay(pdMS_TO_TICKS(DELAY_500_MS));
     }
 }

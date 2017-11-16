@@ -69,7 +69,6 @@ uint16_t resultsBuffer[NUM_ADC_CHANNELS];
 
 void init_ADC(SemaphoreHandle_t *xBinarySemaphore){
 
-    ADC_reading_available = 0;
     xBinarySemaphoreADC=xBinarySemaphore;
     /* Zero-filling buffer */
     memset(resultsBuffer, 0x00, NUM_ADC_CHANNELS);
@@ -102,6 +101,7 @@ void init_ADC(SemaphoreHandle_t *xBinarySemaphore){
 
     /* Enabling Interrupts */
     MAP_Interrupt_enableInterrupt(INT_ADC14);
+    /*Cambiamos la prioridad de la interrupcion*/
     Interrupt_setPriority(INT_ADC14, 160);
 
     //MAP_Interrupt_enableMaster();
@@ -113,16 +113,22 @@ void init_ADC(SemaphoreHandle_t *xBinarySemaphore){
 }
 
 axis *ADC_read(void){
-    ADC_reading_available = 0;
     /* Triggering the start of the sample */
     MAP_ADC14_enableConversion();
     MAP_ADC14_toggleConversionTrigger();
     return &readAxis;
 }
+/* Espacio de representacion del ADC 2^14= 16384
+ * Recorrido del aceleremetro 6G (-3G +3G)
+ * Estado de reposo 0G
+ * 16384 / 6 = 2730 puntos por G
+ * Desplazamiento hasta el reposo 3
+ * Por tanto: Input / 2730 - 3 = Ouput (Fuerza G experimentada por el eje)
+ */
 void convertBuffer(void){
-    readAxis.x = ((float) resultsBuffer[0] / 2730) - 3;
-    readAxis.y = ((float) resultsBuffer[1] / 2730) - 3;
-    readAxis.z = ((float) resultsBuffer[2] / 2730) - 3;
+    readAxis.x = ((float) resultsBuffer[0] / POINT_FOR_G) - ZERO_G;
+    readAxis.y = ((float) resultsBuffer[1] / POINT_FOR_G) - ZERO_G;
+    readAxis.z = ((float) resultsBuffer[2] / POINT_FOR_G) - ZERO_G;
 }
 /* This interrupt is fired whenever a conversion is completed and placed in
  * ADC_MEM2. This signals the end of conversion and the results array is

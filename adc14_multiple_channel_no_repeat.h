@@ -4,22 +4,21 @@
  *  Created on: 26 oct. 2017
  *      Author: toni
  */
+#ifndef ADC14_MULTIPLE_CHANNEL_NO_REPEAT_H_
+#define ADC14_MULTIPLE_CHANNEL_NO_REPEAT_H_
 // Includes FreeRTOS
 #include "FreeRTOS.h"
 #include "task.h"
 #include "queue.h"
 #include "semphr.h"
-
-#ifndef ADC14_MULTIPLE_CHANNEL_NO_REPEAT_H_
-#define ADC14_MULTIPLE_CHANNEL_NO_REPEAT_H_
-
-#define NUM_ADC_CHANNELS 3
-
-SemaphoreHandle_t *xBinarySemaphoreADC;
-
 #include <stdint.h>
 
-volatile uint8_t ADC_reading_available;
+
+#define NUM_ADC_CHANNELS 3
+#define POINT_FOR_G 2730
+#define ZERO_G 3
+SemaphoreHandle_t *xBinarySemaphoreADC;
+
 
 typedef struct
 {
