@@ -175,21 +175,21 @@ static void prvUartWriterTask(void *pvParameters)
     for (;;)
     {
         axis writeAxis;
-        while (xQueueReceive(xQueue, &writeAxis, 0))
-        {
-            strcpy(message, "\nAcelaracion en eje X: ");
-            ftoa(writeAxis.x, num, 1);
-            strcat(message, num);
-            strcat(message, "g\n\rAcelaracion en eje Y: ");
-            ftoa(writeAxis.y, num, 1);
-            strcat(message, num);
-            strcat(message, "g\n\rAcelaracion en eje Z: ");
-            ftoa(writeAxis.z, num, 1);
-            strcat(strcat(message, num), "g\n\r");
-            xSemaphoreTake(xMutexUART,portMAX_DELAY);
-            printf_(EUSCI_A0_BASE, message);
-            xSemaphoreGive(xMutexUART);
-        }
+        xQueueReceive(xQueue, &writeAxis, 0);
+
+        strcpy(message, "\nAcelaracion en eje X: ");
+        ftoa(writeAxis.x, num, 1);
+        strcat(message, num);
+        strcat(message, "g\n\rAcelaracion en eje Y: ");
+        ftoa(writeAxis.y, num, 1);
+        strcat(message, num);
+        strcat(message, "g\n\rAcelaracion en eje Z: ");
+        ftoa(writeAxis.z, num, 1);
+        strcat(strcat(message, num), "g\n\r");
+        xSemaphoreTake(xMutexUART, portMAX_DELAY);
+        printf_(EUSCI_A0_BASE, message);
+        xSemaphoreGive(xMutexUART);
+
         vTaskDelay(pdMS_TO_TICKS(DELAY_500_MS));
     }
 }
