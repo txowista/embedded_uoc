@@ -42,10 +42,13 @@
 									<listOptionValue builtIn="false" value="ccs"/>
 								</option>
 								<option id="com.ti.ccstudio.buildDefinitions.MSP432_16.9.compilerID.INCLUDE_PATH.104027576" name="Add dir to #include search path (--include_path, -I)" superClass="com.ti.ccstudio.buildDefinitions.MSP432_16.9.compilerID.INCLUDE_PATH" valueType="includePath">
-									<listOptionValue builtIn="false" value="&quot;${PROJECT_LOC}/freertos/inc&quot;"/>
-									<listOptionValue builtIn="false" value="&quot;${PROJECT_LOC}/sensors&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${ORIGINAL_PROJECT_ROOT}/freertos/inc&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${PROJECT_LOC}/freertos/cortex-m4&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${PROJECT_LOC}/sensors&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${PROJECT_LOC}/msp432&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${PROJECT_LOC}/ti/grlib&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${PROJECT_LOC}/fonts&quot;"/>
+									<listOptionValue builtIn="false" value="&quot;${PROJECT_LOC}/LcdDriver&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${PROJECT_LOC}&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${CCS_BASE_ROOT}/arm/include&quot;"/>
 									<listOptionValue builtIn="false" value="&quot;${CCS_BASE_ROOT}/arm/include/CMSIS&quot;"/>
