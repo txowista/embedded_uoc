@@ -55,6 +55,8 @@ extern unsigned long __STACK_END;
 extern void xPortSysTickHandler( void );
 extern void vPortSVCHandler( void );
 extern void xPortPendSVHandler( void );
+/* External declarations for the interrupt handlers used by the application. */
+extern void ADC14_IRQHandler(void);
 
 /* External declarations for the interrupt handlers used by the application. */
 extern void PORT1_IRQHandler (void);
@@ -106,7 +108,7 @@ void (* const interruptVectors[])(void) =
     EUSCIB1_IRQHandler,                     /* EUSCIB1 ISR               */
     defaultISR,                             /* EUSCIB2 ISR               */
     defaultISR,                             /* EUSCIB3 ISR               */
-    defaultISR,                             /* ADC14 ISR                 */
+    ADC14_IRQHandler,                             /* ADC14 ISR                 */
     defaultISR,                             /* T32_INT1 ISR              */
     defaultISR,                             /* T32_INT2 ISR              */
     defaultISR,                             /* T32_INTC ISR              */

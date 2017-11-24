@@ -2,7 +2,7 @@
 # Automatically-generated file. Do not edit!
 ################################################################################
 
-CG_TOOL_ROOT := /Applications/ti/ccsv7/tools/compiler/ti-cgt-arm_16.9.3.LTS
+CG_TOOL_ROOT := /opt/ti/ccsv7/tools/compiler/ti-cgt-arm_16.9.4.LTS
 
 GEN_OPTS__FLAG := 
 GEN_CMDS__FLAG := 
@@ -21,11 +21,12 @@ ORDERED_OBJS += \
 "./freertos/src/queue.obj" \
 "./freertos/src/tasks.obj" \
 "./freertos/src/timers.obj" \
+"./sensors/adc14_multiple_channel_no_repeat.obj" \
 "./sensors/opt3001.obj" \
 "./sensors/temp_sensor.obj" \
 "./sensors/tmp006.obj" \
 "../msp432p401r.cmd" \
-"/Users/toni/CodeComposerWorkspace/lib/msp432p4xx_driverlib.lib" \
+"../lib/msp432p4xx_driverlib.lib" \
 $(GEN_CMDS__FLAG) \
 -llibc.a \
 
@@ -162,21 +163,21 @@ all: $(OBJS) $(CMD_SRCS) $(LIB_SRCS) $(GEN_CMDS)
 PAC2.out: $(OBJS) $(CMD_SRCS) $(LIB_SRCS) $(GEN_CMDS)
 	@echo 'Building target: $@'
 	@echo 'Invoking: MSP432 Linker'
-	"/Applications/ti/ccsv7/tools/compiler/ti-cgt-arm_16.9.3.LTS/bin/armcl" -mv7M4 --code_state=16 --float_support=FPv4SPD16 -me --advice:power="all" --define=__MSP432P401R__ --define=TARGET_IS_MSP432P4XX --define=ccs -g --c99 --gcc --diag_warning=225 --diag_wrap=off --display_error_number --abi=eabi -z -m"PAC2.map" --heap_size=1024 --stack_size=512 -i"/Applications/ti/ccsv7/ccs_base/arm/include" -i"/Applications/ti/ccsv7/tools/compiler/ti-cgt-arm_16.9.3.LTS/lib" -i"/Applications/ti/ccsv7/tools/compiler/ti-cgt-arm_16.9.3.LTS/include" --reread_libs --diag_wrap=off --display_error_number --warn_sections --xml_link_info="PAC2_linkInfo.xml" --rom_model -o "PAC2.out" $(ORDERED_OBJS)
+	"/opt/ti/ccsv7/tools/compiler/ti-cgt-arm_16.9.4.LTS/bin/armcl" -mv7M4 --code_state=16 --float_support=FPv4SPD16 -me --advice:power="all" --define=__MSP432P401R__ --define=TARGET_IS_MSP432P4XX --define=ccs -g --c99 --gcc --diag_warning=225 --diag_wrap=off --display_error_number --abi=eabi -z -m"PAC2.map" --heap_size=1024 --stack_size=512 -i"/opt/ti/ccsv7/ccs_base/arm/include" -i"/opt/ti/ccsv7/tools/compiler/ti-cgt-arm_16.9.4.LTS/lib" -i"/opt/ti/ccsv7/tools/compiler/ti-cgt-arm_16.9.4.LTS/include" --reread_libs --diag_wrap=off --display_error_number --warn_sections --xml_link_info="PAC2_linkInfo.xml" --rom_model -o "PAC2.out" $(ORDERED_OBJS)
 	@echo 'Finished building target: $@'
 	@echo ' '
 
 PAC2.hex: $(EXE_OUTPUTS)
 	@echo 'Invoking: MSP432 Hex Utility'
-	"/Applications/ti/ccsv7/tools/compiler/ti-cgt-arm_16.9.3.LTS/bin/armhex" --memwidth=8 --romwidth=8 -o "PAC2.hex" $(EXE_OUTPUTS__QUOTED)
+	"/opt/ti/ccsv7/tools/compiler/ti-cgt-arm_16.9.4.LTS/bin/armhex" --memwidth=8 --romwidth=8 -o "PAC2.hex" $(EXE_OUTPUTS__QUOTED)
 	@echo 'Finished building: $@'
 	@echo ' '
 
 # Other Targets
 clean:
 	-$(RM) $(BIN_OUTPUTS__QUOTED)$(EXE_OUTPUTS__QUOTED)
-	-$(RM) "i2c_driver.obj" "main.obj" "msp432_startup_ccs.obj" "system_msp432p401r.obj" "freertos/cortex-m4/port.obj" "freertos/cortex-m4/portasm.obj" "freertos/src/croutine.obj" "freertos/src/event_groups.obj" "freertos/src/heap_2.obj" "freertos/src/list.obj" "freertos/src/queue.obj" "freertos/src/tasks.obj" "freertos/src/timers.obj" "sensors/opt3001.obj" "sensors/temp_sensor.obj" "sensors/tmp006.obj" 
-	-$(RM) "i2c_driver.d" "main.d" "msp432_startup_ccs.d" "system_msp432p401r.d" "freertos/cortex-m4/port.d" "freertos/src/croutine.d" "freertos/src/event_groups.d" "freertos/src/heap_2.d" "freertos/src/list.d" "freertos/src/queue.d" "freertos/src/tasks.d" "freertos/src/timers.d" "sensors/opt3001.d" "sensors/temp_sensor.d" "sensors/tmp006.d" 
+	-$(RM) "i2c_driver.obj" "main.obj" "msp432_startup_ccs.obj" "system_msp432p401r.obj" "freertos/cortex-m4/port.obj" "freertos/cortex-m4/portasm.obj" "freertos/src/croutine.obj" "freertos/src/event_groups.obj" "freertos/src/heap_2.obj" "freertos/src/list.obj" "freertos/src/queue.obj" "freertos/src/tasks.obj" "freertos/src/timers.obj" "sensors/adc14_multiple_channel_no_repeat.obj" "sensors/opt3001.obj" "sensors/temp_sensor.obj" "sensors/tmp006.obj" 
+	-$(RM) "i2c_driver.d" "main.d" "msp432_startup_ccs.d" "system_msp432p401r.d" "freertos/cortex-m4/port.d" "freertos/src/croutine.d" "freertos/src/event_groups.d" "freertos/src/heap_2.d" "freertos/src/list.d" "freertos/src/queue.d" "freertos/src/tasks.d" "freertos/src/timers.d" "sensors/adc14_multiple_channel_no_repeat.d" "sensors/opt3001.d" "sensors/temp_sensor.d" "sensors/tmp006.d" 
 	-$(RM) "freertos/cortex-m4/portasm.d" 
 	-@echo 'Finished clean'
 	-@echo ' '

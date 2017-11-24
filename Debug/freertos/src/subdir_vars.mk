@@ -4,13 +4,13 @@
 
 # Add inputs and outputs from these tool invocations to the build variables 
 C_SRCS += \
-/Users/toni/CodeComposerWorkspace/freertos/src/croutine.c \
-/Users/toni/CodeComposerWorkspace/freertos/src/event_groups.c \
-/Users/toni/CodeComposerWorkspace/freertos/src/heap_2.c \
-/Users/toni/CodeComposerWorkspace/freertos/src/list.c \
-/Users/toni/CodeComposerWorkspace/freertos/src/queue.c \
-/Users/toni/CodeComposerWorkspace/freertos/src/tasks.c \
-/Users/toni/CodeComposerWorkspace/freertos/src/timers.c 
+../freertos/src/croutine.c \
+../freertos/src/event_groups.c \
+../freertos/src/heap_2.c \
+../freertos/src/list.c \
+../freertos/src/queue.c \
+../freertos/src/tasks.c \
+../freertos/src/timers.c 
 
 C_DEPS += \
 ./freertos/src/croutine.d \
@@ -49,12 +49,12 @@ C_DEPS__QUOTED += \
 "freertos/src/timers.d" 
 
 C_SRCS__QUOTED += \
-"/Users/toni/CodeComposerWorkspace/freertos/src/croutine.c" \
-"/Users/toni/CodeComposerWorkspace/freertos/src/event_groups.c" \
-"/Users/toni/CodeComposerWorkspace/freertos/src/heap_2.c" \
-"/Users/toni/CodeComposerWorkspace/freertos/src/list.c" \
-"/Users/toni/CodeComposerWorkspace/freertos/src/queue.c" \
-"/Users/toni/CodeComposerWorkspace/freertos/src/tasks.c" \
-"/Users/toni/CodeComposerWorkspace/freertos/src/timers.c" 
+"../freertos/src/croutine.c" \
+"../freertos/src/event_groups.c" \
+"../freertos/src/heap_2.c" \
+"../freertos/src/list.c" \
+"../freertos/src/queue.c" \
+"../freertos/src/tasks.c" \
+"../freertos/src/timers.c" 
 
 

@@ -48,6 +48,7 @@
 #include "temp_sensor.h"
 #include "opt3001.h"
 #include "tmp006.h"
+#include "adc14_multiple_channel_no_repeat.h"
 
 // Definicion de parametros RTOS
 #define WRITER_TASK_PRIORITY    1
@@ -55,6 +56,7 @@
 #define HEARTBEAT_TASK_PRIORITY 1
 #define QUEUE_SIZE  10
 #define ONE_SECOND_MS  1000
+#define DELAY_100_MS     100
 #define HEART_BEAT_ON_MS 10
 #define HEART_BEAT_OFF_MS 990
 #define BUFFER_SIZE 10
@@ -77,8 +79,8 @@ const eUSCI_UART_Config uartConfig =
 
 // Prototipos de funciones privadas
 static void prvSetupHardware(void);
-static void prvTempWriterTask(void *pvParameters);
-static void prvLightWriterTask(void *pvParameters);
+static void prvTempLightWriterTask(void *pvParameters);
+static void prvForceGWriterTask(void *pvParameters);
 static void prvReaderTask(void *pvParameters);
 static void prvHeartBeatTask(void *pvParameters);
 
@@ -88,6 +90,7 @@ SemaphoreHandle_t xMutexUART;
 SemaphoreHandle_t xMutexBuff;
 // Declaracion de un semaforo binario para la ISR/lectura de buffer
 SemaphoreHandle_t xBinarySemaphoreISR;
+SemaphoreHandle_t xBinarySemaphoreForceG;
 
 typedef enum Sensor
 {
@@ -104,6 +107,7 @@ typedef struct {
 // Buffer de mensajes
 Queue_reg_t buffer[BUFFER_SIZE];
 uint8_t buff_pos;
+xQueueHandle xQueueForceG; // Variable para referenciar a la cola
 
 //funcion imprimir string por UART
 void printf_(uint32_t moduleInstance, char *message){
@@ -118,6 +122,7 @@ int main(void)
 {
     // Inicializacion de semaforo binario
     xBinarySemaphoreISR = xSemaphoreCreateBinary();
+    xBinarySemaphoreForceG = xSemaphoreCreateBinary();
     // Inicializacio de mutexs
     xMutexI2C = xSemaphoreCreateMutex();
     xMutexUART = xSemaphoreCreateMutex();
@@ -126,7 +131,8 @@ int main(void)
 
 
     // Comprueba si semaforo y mutex se han creado bien
-    if ((xBinarySemaphoreISR != NULL) && (xMutexBuff != NULL) &&
+    if ((xBinarySemaphoreISR != NULL) && (xBinarySemaphoreForceG != NULL) &&
+            (xMutexBuff != NULL)  &&
             (xMutexI2C != NULL) && (xMutexUART != NULL))
     {
         // Inicializacion del hardware (clocks, GPIOs, IRQs)
@@ -137,11 +143,11 @@ int main(void)
             buffer[i].value = -1.0;
         }
         buff_pos = 0;
-
+        xQueueForceG = xQueueCreate(QUEUE_SIZE, sizeof(axis));
         // Creacion de tareas
-        xTaskCreate( prvTempWriterTask, "TempWriterTask", configMINIMAL_STACK_SIZE, NULL,
+        xTaskCreate( prvTempLightWriterTask, "TempLightWriterTask", configMINIMAL_STACK_SIZE, NULL,
                      WRITER_TASK_PRIORITY,NULL );
-        xTaskCreate( prvLightWriterTask, "LightWriterTask", configMINIMAL_STACK_SIZE, NULL,
+        xTaskCreate( prvForceGWriterTask, "ForceGWriterTask", configMINIMAL_STACK_SIZE, NULL,
                     WRITER_TASK_PRIORITY, NULL );
         xTaskCreate( prvReaderTask, "ReaderTask", configMINIMAL_STACK_SIZE, NULL,
                     READER_TASK_PRIORITY, NULL );
@@ -224,6 +230,8 @@ static void prvSetupHardware(void){
     MAP_Interrupt_setPriority(INT_PORT1, 0xA0);
     // Habilita la interrupcion del PORT1
     MAP_Interrupt_enableInterrupt(INT_PORT1);
+    //Inicializa ADC
+    init_ADC(&xBinarySemaphoreForceG);
     // Habilita que el procesador responda a las interrupciones
     MAP_Interrupt_enableMaster();
 }
@@ -239,62 +247,67 @@ static void prvHeartBeatTask (void *pvParameters){
 }
 
 //Tarea lectura temperatura
-static void prvTempWriterTask (void *pvParameters){
+static void prvTempLightWriterTask (void *pvParameters){
     // Resultado del envio a la cola
     Queue_reg_t queueRegister;
-
+    uint16_t rawData;
+    float convertedLux;
     float temperature;
 
     for(;;){
         vTaskDelay( pdMS_TO_TICKS(ONE_SECOND_MS) );
-
-        // Lee el valor de la medida de temperatura
-        temperature = TMP006_readAmbientTemperature();
-
-        queueRegister.sensor = temp;
-        queueRegister.value = temperature;
-        // Envia un comando a traves de la cola si hay espacio
-        if (DEBUG_MSG && xSemaphoreTake(xMutexUART,portMAX_DELAY)){
-            printf_(EUSCI_A0_BASE, "Enviando temperatura... \n");
-            xSemaphoreGive(xMutexUART);
+        // Intenta coger el mutex, bloqueandose si no esta disponible
+        xSemaphoreTake(xMutexI2C, portMAX_DELAY);
+        {
+            // Lee el valor de la medida de temperatura
+            temperature = TMP006_readAmbientTemperature();
+            queueRegister.sensor = temp;
+            queueRegister.value = temperature;
+            xSemaphoreGive(xMutexI2C);
         }
         if(xSemaphoreTake(xMutexBuff,portMAX_DELAY)){
             buff_pos++;
             buffer[buff_pos % BUFFER_SIZE] = queueRegister;
             xSemaphoreGive(xMutexBuff);
         }
+        xSemaphoreTake(xMutexI2C, portMAX_DELAY);
+        {
+            // Lee el valor de la medida de luz
+            sensorOpt3001Read(&rawData);
+            sensorOpt3001Convert(rawData, &convertedLux);
+            queueRegister.sensor = light;
+            queueRegister.value = convertedLux;
+            xSemaphoreGive(xMutexI2C);
+        }
+        if(xSemaphoreTake(xMutexBuff,portMAX_DELAY)){
+            buff_pos++;
+            buffer[buff_pos % BUFFER_SIZE] = queueRegister;
+            xSemaphoreGive(xMutexBuff);
+        }
+        // Envia un comando a traves de la cola si hay espacio
+        if (DEBUG_MSG && xSemaphoreTake(xMutexUART,portMAX_DELAY)){
+            printf_(EUSCI_A0_BASE, "Enviando ??... \n");
+            xSemaphoreGive(xMutexUART);
+        }
+
 
     }
 }
 
 //Tarea lectura luz
-static void prvLightWriterTask (void *pvParameters){
+static void prvForceGWriterTask (void *pvParameters){
 
-    // Resultado del envio a la cola
-    Queue_reg_t queueRegister;
-
-    uint16_t rawData;
-    float convertedLux;
-
-    for(;;){
-        vTaskDelay(pdMS_TO_TICKS(ONE_SECOND_MS));
-
-        // Lee el valor de la medida de luz
-        sensorOpt3001Read(&rawData);
-        sensorOpt3001Convert(rawData, &convertedLux);
-
-        queueRegister.sensor = light;
-        queueRegister.value = convertedLux;
-        // Envia un comando a traves de la cola si hay espacio
-        if(DEBUG_MSG && xSemaphoreTake(xMutexUART,portMAX_DELAY)){
-            printf_(EUSCI_A0_BASE, "Enviando luz... \n");
-            xSemaphoreGive(xMutexUART);
+    const TickType_t xMaxExpectedBlockTime = pdMS_TO_TICKS(500);
+    for (;;)
+    {
+        vTaskDelay(pdMS_TO_TICKS(DELAY_100_MS));
+        axis *readAxis;
+        readAxis = ADC_read();
+        if ( xSemaphoreTake( xBinarySemaphoreForceG, xMaxExpectedBlockTime ) == pdPASS)
+        {
+            xQueueSendToBack(xQueueForceG, readAxis, portMAX_DELAY);
         }
-        if(xSemaphoreTake(xMutexBuff,portMAX_DELAY)){
-            buff_pos++;
-            buffer[buff_pos % BUFFER_SIZE] = queueRegister;
-            xSemaphoreGive(xMutexBuff);
-        }
+
     }
 }
 
@@ -302,8 +315,9 @@ static void prvLightWriterTask (void *pvParameters){
 static void prvReaderTask (void *pvParameters)
 {
     Queue_reg_t queueRegister;
-    char message[50];
-    char value[10];
+    char message[100];
+    char value[20];
+    axis writeAxis;
     for(;;){
         // El semaforo debe ser entregado por la ISR PORT1_IRQHandler
         // Espera un numero maximo de xMaxExpectedBlockTime ticks
@@ -329,6 +343,20 @@ static void prvReaderTask (void *pvParameters)
                 }
                 xSemaphoreGive(xMutexBuff);
             }
+                xQueueReceive(xQueueForceG, &writeAxis, 0);
+                strcpy(message, "\nAceleracion en eje X: ");
+                ftoa(writeAxis.x, value, 1);
+                strcat(message, value);
+                strcat(message, "g\n\rAceleracion en eje Y: ");
+                ftoa(writeAxis.y, value, 1);
+                strcat(message, value);
+                strcat(message, "g\n\rAceleracion en eje Z: ");
+                ftoa(writeAxis.z, value, 1);
+                strcat(strcat(message, value), "g\n\r");
+                if(xSemaphoreTake(xMutexUART,portMAX_DELAY)){
+                    printf_(EUSCI_A0_BASE, message);
+                    xSemaphoreGive(xMutexUART);
+                }
         }
     }
 }

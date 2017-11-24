@@ -4,10 +4,10 @@
 
 # Add inputs and outputs from these tool invocations to the build variables 
 ASM_SRCS += \
-/Users/toni/CodeComposerWorkspace/freertos/cortex-m4/portasm.asm 
+../freertos/cortex-m4/portasm.asm 
 
 C_SRCS += \
-/Users/toni/CodeComposerWorkspace/freertos/cortex-m4/port.c 
+../freertos/cortex-m4/port.c 
 
 C_DEPS += \
 ./freertos/cortex-m4/port.d 
@@ -30,9 +30,9 @@ ASM_DEPS__QUOTED += \
 "freertos/cortex-m4/portasm.d" 
 
 C_SRCS__QUOTED += \
-"/Users/toni/CodeComposerWorkspace/freertos/cortex-m4/port.c" 
+"../freertos/cortex-m4/port.c" 
 
 ASM_SRCS__QUOTED += \
-"/Users/toni/CodeComposerWorkspace/freertos/cortex-m4/portasm.asm" 
+"../freertos/cortex-m4/portasm.asm" 
 
 

@@ -28,23 +28,23 @@
 		<link>
 			<name>freertos</name>
 			<type>2</type>
-			<locationURI>PARENT-1-PROJECT_LOC/freertos</locationURI>
+			<locationURI>PROJECT_LOC/freertos</locationURI>
 		</link>
 		<link>
 			<name>lib</name>
 			<type>2</type>
-			<locationURI>PARENT-1-PROJECT_LOC/lib</locationURI>
+			<locationURI>PROJECT_LOC/lib</locationURI>
 		</link>
 		<link>
 			<name>msp432</name>
 			<type>2</type>
-			<locationURI>PARENT-1-PROJECT_LOC/ti/msp432</locationURI>
+			<locationURI>PROJECT_LOC/msp432</locationURI>
 		</link>
 	</linkedResources>
 	<variableList>
 		<variable>
 			<name>ORIGINAL_PROJECT_ROOT</name>
-			<value>file:/Users/toni/Desktop/PAC2</value>
+			<value>file:/home/igor/workspace_v7/PAC2</value>
 		</variable>
 	</variableList>
 </projectDescription>
