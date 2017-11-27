@@ -49,6 +49,8 @@
 #include "opt3001.h"
 #include "tmp006.h"
 #include "adc14_multiple_channel_no_repeat.h"
+#include "LcdDriver/Crystalfontz128x128_ST7735.h"
+#include "util.h"
 
 // Definicion de parametros RTOS
 #define WRITER_TASK_PRIORITY    1
@@ -88,6 +90,7 @@ static void prvHeartBeatTask(void *pvParameters);
 SemaphoreHandle_t xMutexI2C;
 SemaphoreHandle_t xMutexUART;
 SemaphoreHandle_t xMutexBuff;
+SemaphoreHandle_t xMutexSPI;
 // Declaracion de un semaforo binario para la ISR/lectura de buffer
 SemaphoreHandle_t xBinarySemaphoreISR;
 SemaphoreHandle_t xBinarySemaphoreForceG;
@@ -108,7 +111,11 @@ typedef struct {
 Queue_reg_t buffer[BUFFER_SIZE];
 uint8_t buff_pos;
 xQueueHandle xQueueForceG; // Variable para referenciar a la cola
-
+QueueHandle_t xQueueLightTemp; // Variable para referenciar a la cola
+/* Graphic library context */
+Graphics_Context g_sContext;
+void drawTitle(void);
+void drawText(char *message, int pos);
 //funcion imprimir string por UART
 void printf_(uint32_t moduleInstance, char *message){
     int index = 0;
@@ -127,6 +134,7 @@ int main(void)
     xMutexI2C = xSemaphoreCreateMutex();
     xMutexUART = xSemaphoreCreateMutex();
     xMutexBuff= xSemaphoreCreateMutex();
+    xMutexSPI= xSemaphoreCreateMutex();
 
 
 
@@ -144,6 +152,7 @@ int main(void)
         }
         buff_pos = 0;
         xQueueForceG = xQueueCreate(QUEUE_SIZE, sizeof(axis));
+        xQueueLightTemp = xQueueCreate(QUEUE_SIZE, sizeof(Queue_reg_t));
         // Creacion de tareas
         xTaskCreate( prvTempLightWriterTask, "TempLightWriterTask", configMINIMAL_STACK_SIZE, NULL,
                      WRITER_TASK_PRIORITY,NULL );
@@ -220,7 +229,18 @@ static void prvSetupHardware(void){
     MAP_UART_initModule(EUSCI_A0_BASE, &uartConfig);
     // Habilitacion de la UART
     MAP_UART_enableModule(EUSCI_A0_BASE);
+    /* Initializes display */
+    Crystalfontz128x128_Init();
 
+    /* Set default screen orientation */
+    Crystalfontz128x128_SetOrientation(LCD_ORIENTATION_UP);
+    /* Initializes graphics context */
+    Graphics_initContext(&g_sContext, &g_sCrystalfontz128x128, &g_sCrystalfontz128x128_funcs);
+    Graphics_setForegroundColor(&g_sContext, GRAPHICS_COLOR_RED);
+    Graphics_setBackgroundColor(&g_sContext, GRAPHICS_COLOR_WHITE);
+    GrContextFontSet(&g_sContext, &g_sFontFixed6x8);
+
+    drawTitle();
 
     // Reset del flag de interrupcion del pin P1.1
     MAP_GPIO_clearInterruptFlag(GPIO_PORT_P1, GPIO_PIN1);
@@ -235,7 +255,25 @@ static void prvSetupHardware(void){
     // Habilita que el procesador responda a las interrupciones
     MAP_Interrupt_enableMaster();
 }
+/*
+ * Clear display and redraw title + accelerometer data
+ */
+void drawTitle()
+{
+    Graphics_clearDisplay(&g_sContext);
+    drawText("PRAC IGOR G.L.:", 10);
 
+}
+void drawText(char *message, int pos){
+    if (xSemaphoreTake(xMutexSPI,portMAX_DELAY)){
+        MAP_Interrupt_disableMaster();
+        Graphics_drawStringCentered(&g_sContext, (int8_t *) message,
+        AUTO_STRING_LENGTH,64, pos, OPAQUE_TEXT);
+        MAP_Interrupt_enableMaster();
+        xSemaphoreGive(xMutexSPI);
+    }
+
+}
 //Tarea heart beat
 static void prvHeartBeatTask (void *pvParameters){
     for(;;){
@@ -266,8 +304,9 @@ static void prvTempLightWriterTask (void *pvParameters){
             xSemaphoreGive(xMutexI2C);
         }
         if(xSemaphoreTake(xMutexBuff,portMAX_DELAY)){
-            buff_pos++;
-            buffer[buff_pos % BUFFER_SIZE] = queueRegister;
+//            buff_pos++;
+            xQueueSend(xQueueLightTemp, ( void * ) &queueRegister, ( TickType_t ) 0);
+//            buffer[buff_pos % BUFFER_SIZE] = queueRegister;
             xSemaphoreGive(xMutexBuff);
         }
         xSemaphoreTake(xMutexI2C, portMAX_DELAY);
@@ -280,8 +319,9 @@ static void prvTempLightWriterTask (void *pvParameters){
             xSemaphoreGive(xMutexI2C);
         }
         if(xSemaphoreTake(xMutexBuff,portMAX_DELAY)){
-            buff_pos++;
-            buffer[buff_pos % BUFFER_SIZE] = queueRegister;
+//            buff_pos++;
+            xQueueSend(xQueueLightTemp, ( void * ) &queueRegister, ( TickType_t ) 0);
+//            buffer[buff_pos % BUFFER_SIZE] = queueRegister;
             xSemaphoreGive(xMutexBuff);
         }
         // Envia un comando a traves de la cola si hay espacio
@@ -305,7 +345,7 @@ static void prvForceGWriterTask (void *pvParameters){
         readAxis = ADC_read();
         if ( xSemaphoreTake( xBinarySemaphoreForceG, xMaxExpectedBlockTime ) == pdPASS)
         {
-            xQueueSendToBack(xQueueForceG, readAxis, portMAX_DELAY);
+            xQueueSend(xQueueForceG,( void * )  readAxis, ( TickType_t ) 0);
         }
 
     }
@@ -318,46 +358,56 @@ static void prvReaderTask (void *pvParameters)
     char message[100];
     char value[20];
     axis writeAxis;
+    int pos=0;
     for(;;){
+        vTaskDelay( pdMS_TO_TICKS(ONE_SECOND_MS) );
         // El semaforo debe ser entregado por la ISR PORT1_IRQHandler
         // Espera un numero maximo de xMaxExpectedBlockTime ticks
-        if( xSemaphoreTake( xBinarySemaphoreISR, portMAX_DELAY ) == pdPASS ){
             if (xSemaphoreTake(xMutexUART,portMAX_DELAY)){
                 printf_(EUSCI_A0_BASE, "\n\r");
                 xSemaphoreGive(xMutexUART);
             }
-            if(xSemaphoreTake(xMutexBuff,portMAX_DELAY)){
-                for(int i=0; i<BUFFER_SIZE; i++){
-                    queueRegister = buffer[i];
-                    if (queueRegister.sensor==light){
-                        strcpy(message, "Lectura de luz: ");
-                    }else if(queueRegister.sensor==temp){
-                        strcpy(message,"Lectura de temperatura: ");
-                    }
-                    ftoa(queueRegister.value, value, 2);
-                    strcat(strcat(message,value),"\n\r");
-                    if(xSemaphoreTake(xMutexUART,portMAX_DELAY)){
-                        printf_(EUSCI_A0_BASE, message);
-                        xSemaphoreGive(xMutexUART);
-                    }
+        if (xSemaphoreTake(xMutexBuff, portMAX_DELAY))
+        {
+            if (xQueueReceive(xQueueLightTemp, &queueRegister,
+                              (TickType_t ) 10))
+            {
+                if (queueRegister.sensor == light)
+                {
+                    strcpy(message, "Luz: ");
+                    pos=30;
                 }
-                xSemaphoreGive(xMutexBuff);
+                else if (queueRegister.sensor == temp)
+                {
+                    strcpy(message, "Temperatura: ");
+                    pos=50;
+                }
+                ftoa(queueRegister.value, value, 2);
+                drawText(strcat(message, value), pos);
+                strcat(message, "\n\r");
+                if (xSemaphoreTake(xMutexUART, portMAX_DELAY))
+                {
+                    printf_(EUSCI_A0_BASE, message);
+                    xSemaphoreGive(xMutexUART);
+                }
             }
+            xSemaphoreGive(xMutexBuff);
+        }
                 xQueueReceive(xQueueForceG, &writeAxis, 0);
-                strcpy(message, "\nAceleracion en eje X: ");
-                ftoa(writeAxis.x, value, 1);
-                strcat(message, value);
-                strcat(message, "g\n\rAceleracion en eje Y: ");
-                ftoa(writeAxis.y, value, 1);
-                strcat(message, value);
-                strcat(message, "g\n\rAceleracion en eje Z: ");
-                ftoa(writeAxis.z, value, 1);
-                strcat(strcat(message, value), "g\n\r");
+                strcpy(message, "Eje X: ");
+                utilFtoa(writeAxis.x, value, 1);
+                drawText(strcat(message, value),70);
+                strcpy(message, "Eje Y: ");
+                utilFtoa(writeAxis.y, value, 1);
+                drawText(strcat(message, value), 90);
+                strcpy(message, "Eje Z: ");
+                utilFtoa(writeAxis.z, value, 1);
+                drawText(strcat(message, value), 110);
                 if(xSemaphoreTake(xMutexUART,portMAX_DELAY)){
                     printf_(EUSCI_A0_BASE, message);
                     xSemaphoreGive(xMutexUART);
                 }
-        }
+
     }
 }
 
