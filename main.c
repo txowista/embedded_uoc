@@ -59,6 +59,7 @@
 #define QUEUE_SIZE  10
 #define ONE_SECOND_MS  1000
 #define DELAY_100_MS     100
+#define DELAY_500_MS     500
 #define HEART_BEAT_ON_MS 10
 #define HEART_BEAT_OFF_MS 990
 #define BUFFER_SIZE 10
@@ -291,9 +292,10 @@ static void prvTempLightWriterTask (void *pvParameters){
     uint16_t rawData;
     float convertedLux;
     float temperature;
-
+    int par=0;
     for(;;){
-        vTaskDelay( pdMS_TO_TICKS(ONE_SECOND_MS) );
+        par++;
+        vTaskDelay( pdMS_TO_TICKS(DELAY_500_MS) );
         // Intenta coger el mutex, bloqueandose si no esta disponible
         xSemaphoreTake(xMutexI2C, portMAX_DELAY);
         {
@@ -309,6 +311,7 @@ static void prvTempLightWriterTask (void *pvParameters){
 //            buffer[buff_pos % BUFFER_SIZE] = queueRegister;
             xSemaphoreGive(xMutexBuff);
         }
+        if(par>=2){
         xSemaphoreTake(xMutexI2C, portMAX_DELAY);
         {
             // Lee el valor de la medida de luz
@@ -323,6 +326,8 @@ static void prvTempLightWriterTask (void *pvParameters){
             xQueueSend(xQueueLightTemp, ( void * ) &queueRegister, ( TickType_t ) 0);
 //            buffer[buff_pos % BUFFER_SIZE] = queueRegister;
             xSemaphoreGive(xMutexBuff);
+        }
+        par=0;
         }
         // Envia un comando a traves de la cola si hay espacio
         if (DEBUG_MSG && xSemaphoreTake(xMutexUART,portMAX_DELAY)){
@@ -369,7 +374,7 @@ static void prvReaderTask (void *pvParameters)
             }
         if (xSemaphoreTake(xMutexBuff, portMAX_DELAY))
         {
-            if (xQueueReceive(xQueueLightTemp, &queueRegister,
+            while (xQueueReceive(xQueueLightTemp, &queueRegister,
                               (TickType_t ) 10))
             {
                 if (queueRegister.sensor == light)
@@ -382,14 +387,15 @@ static void prvReaderTask (void *pvParameters)
                     strcpy(message, "Temperatura: ");
                     pos=50;
                 }
-                ftoa(queueRegister.value, value, 2);
-                drawText(strcat(message, value), pos);
-                strcat(message, "\n\r");
-                if (xSemaphoreTake(xMutexUART, portMAX_DELAY))
-                {
-                    printf_(EUSCI_A0_BASE, message);
-                    xSemaphoreGive(xMutexUART);
-                }
+
+            }
+            ftoa(queueRegister.value, value, 2);
+            drawText(strcat(message, value), pos);
+            strcat(message, "\n\r");
+            if (xSemaphoreTake(xMutexUART, portMAX_DELAY))
+            {
+                printf_(EUSCI_A0_BASE, message);
+                xSemaphoreGive(xMutexUART);
             }
             xSemaphoreGive(xMutexBuff);
         }
