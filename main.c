@@ -110,7 +110,8 @@ typedef struct {
 
 // Buffer de mensajes
 Queue_reg_t buffer[BUFFER_SIZE];
-axis accAxis;
+axis addAxis;
+float addLight;
 uint8_t sizeAxis;
 uint8_t buff_pos;
 xQueueHandle xQueueForceG; // Variable para referenciar a la cola
@@ -122,7 +123,9 @@ void drawTitle(void);
 void drawText(char *message, int pos);
 void drawSize(int size,int pos);
 void drawAxis(int size);
+void drawLight(void);
 void accumulateAxis(axis accInReadAxis);
+void accumulateLight(float addInLight);
 //funcion imprimir string por UART
 void printf_(uint32_t moduleInstance, char *message){
     int index = 0;
@@ -248,15 +251,6 @@ static void prvSetupHardware(void){
     GrContextFontSet(&g_sContext, &g_sFontFixed6x8);
 
     drawTitle();
-
-    // Reset del flag de interrupcion del pin P1.1
-    MAP_GPIO_clearInterruptFlag(GPIO_PORT_P1, GPIO_PIN1);
-    // Habilita la interrupcion del pin P1.1
-    MAP_GPIO_enableInterrupt(GPIO_PORT_P1, GPIO_PIN1);
-    // Configura la prioridad de la interrupcion del PORT1
-    MAP_Interrupt_setPriority(INT_PORT1, 0xA0);
-    // Habilita la interrupcion del PORT1
-    MAP_Interrupt_enableInterrupt(INT_PORT1);
     //Inicializa ADC
     init_ADC(&xBinarySemaphoreForceG);
     // Habilita que el procesador responda a las interrupciones
@@ -281,53 +275,45 @@ void drawText(char *message, int pos){
     }
 
 }
-void drawSize(int size,int pos){
-    char message[100];
-    char value[20];
-    intToStr(size, value, 0);
-    if (pos == 20)
-    {
-        strcpy(message, "COLA LUZ: ");
-    }
-    else if (pos == 60)
-    {
-        strcpy(message, "COLA EJE: ");
-    }
-    drawText(strcat(message, value), pos);
-}
 void drawAxis(int size){
-    char message[100];
-    char value[20];
-    drawSize(size, 60);
+    char message[20];
+    char value[10];
     strcpy(message, "Eje X: ");
-    utilFtoa(accAxis.x/(float)size, value, 1);
+    utilFtoa(addAxis.x/(float)size, value, 1);
     drawText(strcat(message, value),70);
-    if(xSemaphoreTake(xMutexUART,portMAX_DELAY)){
-        printf_(EUSCI_A0_BASE, message);
-        xSemaphoreGive(xMutexUART);
-    }
     strcpy(message, "Eje Y: ");
-    utilFtoa(accAxis.y/(float)size, value, 1);
+    utilFtoa(addAxis.y/(float)size, value, 1);
     drawText(strcat(message, value), 90);
-    if(xSemaphoreTake(xMutexUART,portMAX_DELAY)){
-        printf_(EUSCI_A0_BASE, message);
-        xSemaphoreGive(xMutexUART);
-    }
     strcpy(message, "Eje Z: ");
-    utilFtoa(accAxis.z/(float)size, value, 1);
+    utilFtoa(addAxis.z/(float)size, value, 1);
     drawText(strcat(message, value), 110);
-    if(xSemaphoreTake(xMutexUART,portMAX_DELAY)){
-        printf_(EUSCI_A0_BASE, strcat(message,"\n\r"));
-        xSemaphoreGive(xMutexUART);
-    }
-
-
+    addAxis.x = 0;
+    addAxis.y = 0;
+    addAxis.z = 0;
 }
 void accumulateAxis(axis accInReadAxis){
-    accAxis.x+=accInReadAxis.x;
-    accAxis.y+=accInReadAxis.y;
-    accAxis.z+=accInReadAxis.z;
+    addAxis.x+=accInReadAxis.x;
+    addAxis.y+=accInReadAxis.y;
+    addAxis.z+=accInReadAxis.z;
 }
+void accumulateLight(float addInLight){
+    if(addLight==0){
+        addLight=addInLight;
+    }else{
+        addLight+=addInLight;
+        addLight/=2.0;
+        drawLight();
+        addLight=0;
+    }
+}
+void drawLight(void){
+    char message[20];
+    char value[10];
+    strcpy(message, "Luz: ");
+    ftoa(addLight, value, 2);
+    drawText(strcat(message, value), 30);
+}
+
 //Tarea heart beat
 static void prvHeartBeatTask (void *pvParameters){
     for(;;){
@@ -350,6 +336,7 @@ static void prvTempLightWriterTask (void *pvParameters){
         par++;
         vTaskDelay( pdMS_TO_TICKS(DELAY_500_MS) );
         // Intenta coger el mutex, bloqueandose si no esta disponible
+        if(par>=2){
         xSemaphoreTake(xMutexI2C, portMAX_DELAY);
         {
             // Lee el valor de la medida de temperatura
@@ -364,7 +351,8 @@ static void prvTempLightWriterTask (void *pvParameters){
 //            buffer[buff_pos % BUFFER_SIZE] = queueRegister;
             xSemaphoreGive(xMutexBuff);
         }
-        if(par>=2){
+        par=0;
+        }
         xSemaphoreTake(xMutexI2C, portMAX_DELAY);
         {
             // Lee el valor de la medida de luz
@@ -380,8 +368,7 @@ static void prvTempLightWriterTask (void *pvParameters){
 //            buffer[buff_pos % BUFFER_SIZE] = queueRegister;
             xSemaphoreGive(xMutexBuff);
         }
-        par=0;
-        }
+
         // Envia un comando a traves de la cola si hay espacio
         if (DEBUG_MSG && xSemaphoreTake(xMutexUART,portMAX_DELAY)){
             printf_(EUSCI_A0_BASE, "Enviando ??... \n");
@@ -419,26 +406,25 @@ static void prvReaderTask (void *pvParameters)
     int pos=0;
     sizeAxis=0;
     int size=0;
+    addAxis.x = 0;
+    addAxis.y = 0;
+    addAxis.z = 0;
     for (;;)
     {
         vTaskDelay(pdMS_TO_TICKS(ONE_SECOND_MS));
-        accAxis.x = 0;
-        accAxis.y = 0;
-        accAxis.z = 0;
+
         size = 0;
         // El semaforo debe ser entregado por la ISR PORT1_IRQHandler
         // Espera un numero maximo de xMaxExpectedBlockTime ticks
 
         if (xSemaphoreTake(xMutexBuff, portMAX_DELAY))
         {
-            drawSize(uxQueueMessagesWaiting(xQueueLightTemp), 20);
             while (xQueueReceive(xQueueLightTemp, &queueRegister,
                                  (TickType_t ) 10))
             {
                 if (queueRegister.sensor == light)
                 {
-                    strcpy(message, "Luz: ");
-                    pos = 30;
+                    accumulateLight(queueRegister.value);
                 }
                 else if (queueRegister.sensor == temp)
                 {
@@ -461,34 +447,3 @@ static void prvReaderTask (void *pvParameters)
     }
 }
 
-// Rutina de Servicio a Interrupcion (ISR) del PORT1
-void PORT1_IRQHandler(void)
-{
-    uint32_t status;
-        static BaseType_t xHigherPriorityTaskWoken;
-
-        // Lee el estado de la interrupcion generada por GPIO_PORT_P1
-        status = MAP_GPIO_getEnabledInterruptStatus(GPIO_PORT_P1);
-        // Reset del flag de interrupcion del pin que la genera
-        MAP_GPIO_clearInterruptFlag(GPIO_PORT_P1, status);
-
-        // Chequea si la interrupcion la genero el pin P1.1
-        if(status & GPIO_PIN1)
-        {
-            // El par�metro xHigherPriorityTaskWoken debe inicializarse en pdFALSE,
-            // ya que se establecer� en pdTRUE dentro de la funci�n API de interrupci�n
-            // segura si se requiere un cambio de contexto
-            xHigherPriorityTaskWoken = pdFALSE;
-
-            // Entrega el semaforo desde la ISR para desbloquear la tarea SenderTask
-            xSemaphoreGiveFromISR( xBinarySemaphoreISR, &xHigherPriorityTaskWoken );
-
-            // Pasa el valor xHigherPriorityTaskWoken en portYIELD_FROM_ISR().
-            // Si xHigherPriorityTaskWoken se estableci� en pdTRUE dentro de
-            // xSemaphoreGiveFromISR(), entonces al llamar a portYIELD_FROM_ISR()
-            // solicitar� un cambio de contexto. Si xHigherPriorityTaskWoken sigue
-            // siendo pdFALSE, entonces la llamada a portYIELD_FROM_ISR() no tendr�
-            // ning�n efecto
-            portYIELD_FROM_ISR( xHigherPriorityTaskWoken );
-        }
-}
