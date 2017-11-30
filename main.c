@@ -110,13 +110,19 @@ typedef struct {
 
 // Buffer de mensajes
 Queue_reg_t buffer[BUFFER_SIZE];
+axis accAxis;
+uint8_t sizeAxis;
 uint8_t buff_pos;
 xQueueHandle xQueueForceG; // Variable para referenciar a la cola
 QueueHandle_t xQueueLightTemp; // Variable para referenciar a la cola
+
 /* Graphic library context */
 Graphics_Context g_sContext;
 void drawTitle(void);
 void drawText(char *message, int pos);
+void drawSize(int size,int pos);
+void drawAxis(int size);
+void accumulateAxis(axis accInReadAxis);
 //funcion imprimir string por UART
 void printf_(uint32_t moduleInstance, char *message){
     int index = 0;
@@ -159,7 +165,7 @@ int main(void)
                      WRITER_TASK_PRIORITY,NULL );
         xTaskCreate( prvForceGWriterTask, "ForceGWriterTask", configMINIMAL_STACK_SIZE, NULL,
                     WRITER_TASK_PRIORITY, NULL );
-        xTaskCreate( prvReaderTask, "ReaderTask", configMINIMAL_STACK_SIZE, NULL,
+        xTaskCreate( prvReaderTask, "ReaderTask", configMEDIUM_STACK_SIZE, NULL,
                     READER_TASK_PRIORITY, NULL );
         xTaskCreate( prvHeartBeatTask, "HeartBeatTask", configMINIMAL_STACK_SIZE, NULL,
                      HEARTBEAT_TASK_PRIORITY, NULL );
@@ -275,6 +281,53 @@ void drawText(char *message, int pos){
     }
 
 }
+void drawSize(int size,int pos){
+    char message[100];
+    char value[20];
+    intToStr(size, value, 0);
+    if (pos == 20)
+    {
+        strcpy(message, "COLA LUZ: ");
+    }
+    else if (pos == 60)
+    {
+        strcpy(message, "COLA EJE: ");
+    }
+    drawText(strcat(message, value), pos);
+}
+void drawAxis(int size){
+    char message[100];
+    char value[20];
+    drawSize(size, 60);
+    strcpy(message, "Eje X: ");
+    utilFtoa(accAxis.x/(float)size, value, 1);
+    drawText(strcat(message, value),70);
+    if(xSemaphoreTake(xMutexUART,portMAX_DELAY)){
+        printf_(EUSCI_A0_BASE, message);
+        xSemaphoreGive(xMutexUART);
+    }
+    strcpy(message, "Eje Y: ");
+    utilFtoa(accAxis.y/(float)size, value, 1);
+    drawText(strcat(message, value), 90);
+    if(xSemaphoreTake(xMutexUART,portMAX_DELAY)){
+        printf_(EUSCI_A0_BASE, message);
+        xSemaphoreGive(xMutexUART);
+    }
+    strcpy(message, "Eje Z: ");
+    utilFtoa(accAxis.z/(float)size, value, 1);
+    drawText(strcat(message, value), 110);
+    if(xSemaphoreTake(xMutexUART,portMAX_DELAY)){
+        printf_(EUSCI_A0_BASE, strcat(message,"\n\r"));
+        xSemaphoreGive(xMutexUART);
+    }
+
+
+}
+void accumulateAxis(axis accInReadAxis){
+    accAxis.x+=accInReadAxis.x;
+    accAxis.y+=accInReadAxis.y;
+    accAxis.z+=accInReadAxis.z;
+}
 //Tarea heart beat
 static void prvHeartBeatTask (void *pvParameters){
     for(;;){
@@ -364,55 +417,46 @@ static void prvReaderTask (void *pvParameters)
     char value[20];
     axis writeAxis;
     int pos=0;
-    for(;;){
-        vTaskDelay( pdMS_TO_TICKS(ONE_SECOND_MS) );
+    sizeAxis=0;
+    int size=0;
+    for (;;)
+    {
+        vTaskDelay(pdMS_TO_TICKS(ONE_SECOND_MS));
+        accAxis.x = 0;
+        accAxis.y = 0;
+        accAxis.z = 0;
+        size = 0;
         // El semaforo debe ser entregado por la ISR PORT1_IRQHandler
         // Espera un numero maximo de xMaxExpectedBlockTime ticks
-            if (xSemaphoreTake(xMutexUART,portMAX_DELAY)){
-                printf_(EUSCI_A0_BASE, "\n\r");
-                xSemaphoreGive(xMutexUART);
-            }
+
         if (xSemaphoreTake(xMutexBuff, portMAX_DELAY))
         {
+            drawSize(uxQueueMessagesWaiting(xQueueLightTemp), 20);
             while (xQueueReceive(xQueueLightTemp, &queueRegister,
-                              (TickType_t ) 10))
+                                 (TickType_t ) 10))
             {
                 if (queueRegister.sensor == light)
                 {
                     strcpy(message, "Luz: ");
-                    pos=30;
+                    pos = 30;
                 }
                 else if (queueRegister.sensor == temp)
                 {
                     strcpy(message, "Temperatura: ");
-                    pos=50;
+                    pos = 50;
                 }
 
             }
             ftoa(queueRegister.value, value, 2);
             drawText(strcat(message, value), pos);
-            strcat(message, "\n\r");
-            if (xSemaphoreTake(xMutexUART, portMAX_DELAY))
-            {
-                printf_(EUSCI_A0_BASE, message);
-                xSemaphoreGive(xMutexUART);
-            }
             xSemaphoreGive(xMutexBuff);
         }
-                xQueueReceive(xQueueForceG, &writeAxis, 0);
-                strcpy(message, "Eje X: ");
-                utilFtoa(writeAxis.x, value, 1);
-                drawText(strcat(message, value),70);
-                strcpy(message, "Eje Y: ");
-                utilFtoa(writeAxis.y, value, 1);
-                drawText(strcat(message, value), 90);
-                strcpy(message, "Eje Z: ");
-                utilFtoa(writeAxis.z, value, 1);
-                drawText(strcat(message, value), 110);
-                if(xSemaphoreTake(xMutexUART,portMAX_DELAY)){
-                    printf_(EUSCI_A0_BASE, message);
-                    xSemaphoreGive(xMutexUART);
-                }
+        size = uxQueueMessagesWaiting(xQueueForceG);
+        while (xQueueReceive(xQueueForceG, &writeAxis, 0))
+        {
+            accumulateAxis(writeAxis);
+        }
+        drawAxis(size);
 
     }
 }

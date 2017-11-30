@@ -46,6 +46,7 @@
 /* Constants that describe the hardware and memory usage. */
 #define configCPU_CLOCK_HZ						MAP_CS_getMCLK()
 #define configMINIMAL_STACK_SIZE				( ( uint16_t ) 100 )
+#define configMEDIUM_STACK_SIZE				    ( ( uint16_t ) 300 )
 #define configMAX_TASK_NAME_LEN					( 12 )
 #define configTOTAL_HEAP_SIZE					( ( size_t ) ( 50 * 1024 ) )
 
