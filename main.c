@@ -63,6 +63,7 @@
 #define HEART_BEAT_ON_MS 10
 #define HEART_BEAT_OFF_MS 990
 #define BUFFER_SIZE 10
+#define TEMP_SIZE 60
 
 #define DEBUG_MSG 0
 
@@ -111,21 +112,25 @@ typedef struct {
 // Buffer de mensajes
 Queue_reg_t buffer[BUFFER_SIZE];
 axis addAxis;
-float addLight;
 uint8_t sizeAxis;
 uint8_t buff_pos;
 xQueueHandle xQueueForceG; // Variable para referenciar a la cola
 QueueHandle_t xQueueLightTemp; // Variable para referenciar a la cola
-
+float addLight;
+float previousTemp;
+float addTemp;
+int sizeTemp;
 /* Graphic library context */
 Graphics_Context g_sContext;
 void drawTitle(void);
 void drawText(char *message, int pos);
-void drawSize(int size,int pos);
 void drawAxis(int size);
 void drawLight(void);
+void drawTemp(void);
+void drawDiffTemp(void);
 void accumulateAxis(axis accInReadAxis);
 void accumulateLight(float addInLight);
+void accumulateTemp(float addInTemp);
 //funcion imprimir string por UART
 void printf_(uint32_t moduleInstance, char *message){
     int index = 0;
@@ -161,6 +166,7 @@ int main(void)
             buffer[i].value = -1.0;
         }
         buff_pos = 0;
+        sizeTemp = 0;
         xQueueForceG = xQueueCreate(QUEUE_SIZE, sizeof(axis));
         xQueueLightTemp = xQueueCreate(QUEUE_SIZE, sizeof(Queue_reg_t));
         // Creacion de tareas
@@ -313,6 +319,33 @@ void drawLight(void){
     ftoa(addLight, value, 2);
     drawText(strcat(message, value), 30);
 }
+void accumulateTemp(float addInTemp){
+    addTemp+=addInTemp;
+    sizeTemp++;
+    if(sizeTemp>=TEMP_SIZE){
+        addTemp/=TEMP_SIZE;
+        sizeTemp=0;
+        drawTemp();
+        if (previousTemp==0){
+            previousTemp=addTemp;
+            drawDiffTemp();
+        }
+    }
+}
+void drawTemp(){
+    char message[20];
+    char value[10];
+    strcpy(message, "Temp: ");
+    ftoa(addTemp, value, 2);
+    drawText(strcat(message, value), 40);
+}
+void drawDiffTemp(){
+    char message[20];
+    char value[10];
+    strcpy(message, "Temp Previous: ");
+    ftoa(addTemp-previousTemp, value, 2);
+    drawText(strcat(message, value), 50);
+}
 
 //Tarea heart beat
 static void prvHeartBeatTask (void *pvParameters){
@@ -346,9 +379,7 @@ static void prvTempLightWriterTask (void *pvParameters){
             xSemaphoreGive(xMutexI2C);
         }
         if(xSemaphoreTake(xMutexBuff,portMAX_DELAY)){
-//            buff_pos++;
             xQueueSend(xQueueLightTemp, ( void * ) &queueRegister, ( TickType_t ) 0);
-//            buffer[buff_pos % BUFFER_SIZE] = queueRegister;
             xSemaphoreGive(xMutexBuff);
         }
         par=0;
@@ -363,9 +394,7 @@ static void prvTempLightWriterTask (void *pvParameters){
             xSemaphoreGive(xMutexI2C);
         }
         if(xSemaphoreTake(xMutexBuff,portMAX_DELAY)){
-//            buff_pos++;
             xQueueSend(xQueueLightTemp, ( void * ) &queueRegister, ( TickType_t ) 0);
-//            buffer[buff_pos % BUFFER_SIZE] = queueRegister;
             xSemaphoreGive(xMutexBuff);
         }
 
@@ -400,10 +429,7 @@ static void prvForceGWriterTask (void *pvParameters){
 static void prvReaderTask (void *pvParameters)
 {
     Queue_reg_t queueRegister;
-    char message[100];
-    char value[20];
     axis writeAxis;
-    int pos=0;
     sizeAxis=0;
     int size=0;
     addAxis.x = 0;
@@ -428,13 +454,10 @@ static void prvReaderTask (void *pvParameters)
                 }
                 else if (queueRegister.sensor == temp)
                 {
-                    strcpy(message, "Temperatura: ");
-                    pos = 50;
+                    accumulateTemp(queueRegister.value);
                 }
 
             }
-            ftoa(queueRegister.value, value, 2);
-            drawText(strcat(message, value), pos);
             xSemaphoreGive(xMutexBuff);
         }
         size = uxQueueMessagesWaiting(xQueueForceG);
