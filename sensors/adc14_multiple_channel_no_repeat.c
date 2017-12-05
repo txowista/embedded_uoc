@@ -64,9 +64,9 @@
 #include "driverlib.h"
 /* Standard Includes */
 #include <string.h>
-
+extern float forceGTemp;
 uint16_t resultsBuffer[NUM_ADC_CHANNELS];
-
+enum axisType currentAxis;
 void init_ADC(SemaphoreHandle_t *xBinarySemaphore){
 
     xBinarySemaphoreADC=xBinarySemaphore;
@@ -118,6 +118,14 @@ axis *ADC_read(void){
     MAP_ADC14_toggleConversionTrigger();
     return &readAxis;
 }
+float correctTemp(float temp2modified, enum axisType currentAxis){
+    float temp=REFERENCE_TEMP-temp2modified;
+    if(currentAxis==z){
+        return (0.0004f*temp);
+    }else{
+        return (0.0007f*temp);
+    }
+}
 /* Espacio de representacion del ADC 2^14= 16384
  * Recorrido del aceleremetro 6G (-3G +3G)
  * Estado de reposo 0G
@@ -126,9 +134,10 @@ axis *ADC_read(void){
  * Por tanto: Input / 2730 - 3 = Ouput (Fuerza G experimentada por el eje)
  */
 void convertBuffer(void){
-    readAxis.x = ((float) resultsBuffer[0] / POINT_FOR_G) - ZERO_G;
-    readAxis.y = ((float) resultsBuffer[1] / POINT_FOR_G) - ZERO_G;
-    readAxis.z = ((float) resultsBuffer[2] / POINT_FOR_G) - ZERO_G;
+    enum axisType currentAxis;
+    readAxis.x = (((float) resultsBuffer[x] / POINT_FOR_G) - ZERO_G)*(1+correctTemp(forceGTemp,x));
+    readAxis.y = (((float) resultsBuffer[y] / POINT_FOR_G) - ZERO_G)*(1+correctTemp(forceGTemp,y));
+    readAxis.z = (((float) resultsBuffer[z] / POINT_FOR_G) - ZERO_G)*(1+correctTemp(forceGTemp,z));
 }
 /* This interrupt is fired whenever a conversion is completed and placed in
  * ADC_MEM2. This signals the end of conversion and the results array is
