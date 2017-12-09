@@ -68,18 +68,6 @@
 
 #define DEBUG_MSG 0
 
-// UART Configuration Parameter (9600 bps - clock 8MHz)
-const eUSCI_UART_Config uartConfig = {
-EUSCI_A_UART_CLOCKSOURCE_SMCLK,          // SMCLK Clock Source
-        52,                                      // BRDIV = 78
-        1,                                       // UCxBRF = 2
-        0,                                       // UCxBRS = 0
-        EUSCI_A_UART_NO_PARITY,                  // No Parity
-        EUSCI_A_UART_LSB_FIRST,                  // LSB First
-        EUSCI_A_UART_ONE_STOP_BIT,               // One stop bit
-        EUSCI_A_UART_MODE,                       // UART mode
-        EUSCI_A_UART_OVERSAMPLING_BAUDRATE_GENERATION  // Oversampling
-        };
 
 // Prototipos de funciones privadas
 static void prvSetupHardware(void);
@@ -128,23 +116,13 @@ Graphics_Context g_sContext;
 void drawTitle(void);
 void drawText(char *message, int pos);
 void drawAxis(int size);
+void setOrientation(axis *orientationAxis);
 void drawLight(void);
 void drawTemp(void);
 void drawDiffTemp(void);
 void accumulateAxis(axis accInReadAxis);
 void accumulateLight(float addInLight);
 void accumulateTemp(float addInTemp);
-//funcion imprimir string por UART
-void printf_(uint32_t moduleInstance, char *message)
-{
-    int index = 0;
-    while (message[index] != '\0')
-    {
-        MAP_UART_transmitData(EUSCI_A0_BASE, message[index]);
-        index++;
-    }
-}
-
 int main(void)
 {
     // Inicializacion de semaforo binario
@@ -193,8 +171,6 @@ int main(void)
                     NULL,
                     HEARTBEAT_TASK_PRIORITY,
                     NULL);
-        // Puesta en marcha de las tareas creadas
-        printf_(EUSCI_A0_BASE, "Tareas creadas \n\r");
         vTaskStartScheduler();
     }
     // Solo llega aqui si no hay suficiente memoria
@@ -252,16 +228,6 @@ static void prvSetupHardware(void)
     sensorOpt3001Init();
     sensorOpt3001Enable(true);
 
-    // Configuracion del pin P1.1 como entrada con R de pull-up
-    MAP_GPIO_setAsInputPinWithPullUpResistor(GPIO_PORT_P1, GPIO_PIN1);
-
-    // Seleccion de modo UART en pines P1.2 y P1.3
-    MAP_GPIO_setAsPeripheralModuleFunctionInputPin(
-            GPIO_PORT_P1, GPIO_PIN2 | GPIO_PIN3, GPIO_PRIMARY_MODULE_FUNCTION);
-    // Configuracion de la UART
-    MAP_UART_initModule(EUSCI_A0_BASE, &uartConfig);
-    // Habilitacion de la UART
-    MAP_UART_enableModule(EUSCI_A0_BASE);
     /* Initializes display */
     Crystalfontz128x128_Init();
 
@@ -302,18 +268,57 @@ void drawText(char *message, int pos)
     }
 
 }
+void setOrientation(axis *orientationAxis){
+    if (orientationAxis->x < -1)
+    {
+        if (Lcd_Orientation != LCD_ORIENTATION_LEFT)
+        {
+            Crystalfontz128x128_SetOrientation(LCD_ORIENTATION_LEFT);
+            drawTitle();
+        }
+    }
+    else if (orientationAxis->x  > 1)
+    {
+        if (Lcd_Orientation != LCD_ORIENTATION_RIGHT)
+        {
+            Crystalfontz128x128_SetOrientation(LCD_ORIENTATION_RIGHT);
+            drawTitle();
+        }
+    }
+    else if (orientationAxis->y  > 1)
+    {
+        if (Lcd_Orientation != LCD_ORIENTATION_DOWN)
+        {
+            Crystalfontz128x128_SetOrientation(LCD_ORIENTATION_DOWN);
+            drawTitle();
+        }
+    }
+    else
+    {
+        if (Lcd_Orientation != LCD_ORIENTATION_UP)
+        {
+            Crystalfontz128x128_SetOrientation(LCD_ORIENTATION_UP);
+            drawTitle();
+        }
+    }
+}
 void drawAxis(int size)
 {
     char message[20];
     char value[10];
+    axis myDrawAxis;
+    myDrawAxis.x=addAxis.x / (float) size;
+    myDrawAxis.y=addAxis.y / (float) size;
+    myDrawAxis.z=addAxis.z / (float) size;
+    setOrientation(&myDrawAxis);
     strcpy(message, "Eje X: ");
-    utilFtoa(addAxis.x / (float) size, value, 1);
+    utilFtoa(myDrawAxis.x, value, 1);
     drawText(strcat(message, value), 70);
     strcpy(message, "Eje Y: ");
-    utilFtoa(addAxis.y / (float) size, value, 1);
+    utilFtoa(myDrawAxis.y , value, 1);
     drawText(strcat(message, value), 90);
     strcpy(message, "Eje Z: ");
-    utilFtoa(addAxis.z / (float) size, value, 1);
+    utilFtoa(myDrawAxis.z , value, 1);
     drawText(strcat(message, value), 110);
     addAxis.x = 0;
     addAxis.y = 0;
