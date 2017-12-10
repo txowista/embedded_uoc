@@ -16,9 +16,11 @@
 
 #define NUM_ADC_CHANNELS 3
 #define POINT_FOR_G 2730
+#define CONVERSION_SCALE    3250.0
+#define CONVERSION_OFFSET   8150.0
+
 #define ZERO_G 3
 #define REFERENCE_TEMP 25.0f
-SemaphoreHandle_t *xBinarySemaphoreADC;
 
 enum axisType{
     x,
@@ -34,7 +36,7 @@ typedef struct
 
 axis readAxis;
 extern void convertBuffer(void);
-extern void init_ADC(SemaphoreHandle_t *xBinarySemaphore); //uses interrupt ISR ADC14_IRQHandler
+extern void init_ADC(); //uses interrupt ISR ADC14_IRQHandler
 float correctTemp(float temp2modified, enum axisType currentAxis);
 extern axis *ADC_read(void);
 

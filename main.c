@@ -79,12 +79,11 @@ static TickType_t xBlinkOn;
 static TickType_t xBlinkOff;
 // Declaracion de un mutex para acceso unico a I2C, UART y buffer
 SemaphoreHandle_t xMutexI2C;
-SemaphoreHandle_t xMutexUART;
 SemaphoreHandle_t xMutexBuff;
 SemaphoreHandle_t xMutexSPI;
 // Declaracion de un semaforo binario para la ISR/lectura de buffer
-SemaphoreHandle_t xBinarySemaphoreISR;
-SemaphoreHandle_t xBinarySemaphoreForceG;
+volatile SemaphoreHandle_t xBinarySemaphoreISR;
+volatile SemaphoreHandle_t xBinarySemaphoreForceG;
 
 typedef enum Sensor
 {
@@ -97,9 +96,6 @@ typedef struct
     Sensor sensor;
     float value;
 } Queue_reg_t;
-
-// Buffer de mensajes
-Queue_reg_t buffer[BUFFER_SIZE];
 axis addAxis;
 uint8_t sizeAxis;
 uint8_t buff_pos;
@@ -130,7 +126,6 @@ int main(void)
     xBinarySemaphoreForceG = xSemaphoreCreateBinary();
     // Inicializacio de mutexs
     xMutexI2C = xSemaphoreCreateMutex();
-    xMutexUART = xSemaphoreCreateMutex();
     xMutexBuff = xSemaphoreCreateMutex();
     xMutexSPI = xSemaphoreCreateMutex();
     xBlinkOff = pdMS_TO_TICKS(HEART_BEAT_OFF_MS);
@@ -138,17 +133,10 @@ int main(void)
 
     // Comprueba si semaforo y mutex se han creado bien
     if ((xBinarySemaphoreISR != NULL) && (xBinarySemaphoreForceG != NULL)
-            && (xMutexBuff != NULL) && (xMutexI2C != NULL)
-            && (xMutexUART != NULL))
+            && (xMutexBuff != NULL) && (xMutexI2C != NULL))
     {
         // Inicializacion del hardware (clocks, GPIOs, IRQs)
         prvSetupHardware();
-        // Inicializacion buffer
-        for (int i = 0; i < BUFFER_SIZE; i++)
-        {
-            buffer[i].sensor = light;
-            buffer[i].value = -1.0;
-        }
         buff_pos = 0;
         sizeTemp = 0;
         forceGTempCount= 0;
@@ -242,7 +230,7 @@ static void prvSetupHardware(void)
 
     drawTitle();
     //Inicializa ADC
-    init_ADC(&xBinarySemaphoreForceG);
+    init_ADC();
     // Habilita que el procesador responda a las interrupciones
     MAP_Interrupt_enableMaster();
 }
@@ -269,7 +257,7 @@ void drawText(char *message, int pos)
 
 }
 void setOrientation(axis *orientationAxis){
-    if (orientationAxis->x < -1)
+    if (orientationAxis->x < -0.1)
     {
         if (Lcd_Orientation != LCD_ORIENTATION_LEFT)
         {
@@ -277,7 +265,7 @@ void setOrientation(axis *orientationAxis){
             drawTitle();
         }
     }
-    else if (orientationAxis->x  > 1)
+    else if (orientationAxis->x  > 0.1)
     {
         if (Lcd_Orientation != LCD_ORIENTATION_RIGHT)
         {
@@ -285,7 +273,7 @@ void setOrientation(axis *orientationAxis){
             drawTitle();
         }
     }
-    else if (orientationAxis->y  > 1)
+    else if (orientationAxis->y  > 0.1)
     {
         if (Lcd_Orientation != LCD_ORIENTATION_DOWN)
         {
@@ -444,14 +432,6 @@ static void prvTempLightWriterTask(void *pvParameters)
                        (TickType_t ) 0);
             xSemaphoreGive(xMutexBuff);
         }
-
-        // Envia un comando a traves de la cola si hay espacio
-        if (DEBUG_MSG && xSemaphoreTake(xMutexUART, portMAX_DELAY))
-        {
-            printf_(EUSCI_A0_BASE, "Enviando ??... \n");
-            xSemaphoreGive(xMutexUART);
-        }
-
     }
 }
 

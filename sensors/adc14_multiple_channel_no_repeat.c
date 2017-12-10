@@ -65,11 +65,10 @@
 /* Standard Includes */
 #include <string.h>
 extern float forceGTemp;
+extern SemaphoreHandle_t xBinarySemaphoreForceG;
 uint16_t resultsBuffer[NUM_ADC_CHANNELS];
 enum axisType currentAxis;
-void init_ADC(SemaphoreHandle_t *xBinarySemaphore){
-
-    xBinarySemaphoreADC=xBinarySemaphore;
+void init_ADC(){
     /* Zero-filling buffer */
     memset(resultsBuffer, 0x00, NUM_ADC_CHANNELS);
 
@@ -134,10 +133,9 @@ float correctTemp(float temp2modified, enum axisType currentAxis){
  * Por tanto: Input / 2730 - 3 = Ouput (Fuerza G experimentada por el eje)
  */
 void convertBuffer(void){
-    enum axisType currentAxis;
-    readAxis.x = (((float) resultsBuffer[x] / POINT_FOR_G) - ZERO_G)*(1+correctTemp(forceGTemp,x));
-    readAxis.y = (((float) resultsBuffer[y] / POINT_FOR_G) - ZERO_G)*(1+correctTemp(forceGTemp,y));
-    readAxis.z = (((float) resultsBuffer[z] / POINT_FOR_G) - ZERO_G)*(1+correctTemp(forceGTemp,z));
+    readAxis.x = (((float) resultsBuffer[x] -CONVERSION_OFFSET)/CONVERSION_SCALE)*(1+correctTemp(forceGTemp,x));
+    readAxis.y = (((float) resultsBuffer[y] -CONVERSION_OFFSET)/CONVERSION_SCALE)*(1+correctTemp(forceGTemp,y));
+    readAxis.z = (((float) resultsBuffer[z] -CONVERSION_OFFSET)/CONVERSION_SCALE)*(1+correctTemp(forceGTemp,z));
 }
 /* This interrupt is fired whenever a conversion is completed and placed in
  * ADC_MEM2. This signals the end of conversion and the results array is
@@ -153,8 +151,7 @@ void ADC14_IRQHandler(void)
         MAP_ADC14_getMultiSequenceResult(resultsBuffer);
         convertBuffer();
         xHigherPriorityTaskWoken = pdFALSE;
-        xSemaphoreGiveFromISR(*xBinarySemaphoreADC,
-                &xHigherPriorityTaskWoken);
+        xSemaphoreGiveFromISR(xBinarySemaphoreForceG,&xHigherPriorityTaskWoken);
         portYIELD_FROM_ISR( xHigherPriorityTaskWoken );
     }
 
