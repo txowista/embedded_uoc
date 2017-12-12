@@ -51,7 +51,6 @@
 #include "accelerometer_driver.h"
 #include "adc14_multiple_channel_no_repeat.h"
 #include "LcdDriver/Crystalfontz128x128_ST7735.h"
-#include "util.h"
 
 // Definicion de parametros RTOS
 #define WRITER_TASK_PRIORITY    1
@@ -63,11 +62,7 @@
 #define DELAY_500_MS     500
 #define HEART_BEAT_ON_MS 10
 #define HEART_BEAT_OFF_MS 990
-#define BUFFER_SIZE 10
 #define TEMP_SIZE 60
-#define TEMP_SIZE 60
-
-#define DEBUG_MSG 0
 
 // Prototipos de funciones privadas
 static void prvSetupHardware(void);
@@ -115,6 +110,7 @@ int sizeTemp;
 int forceGTempCount;
 /* Graphic library context */
 Graphics_Context g_sContext;
+//Funciones
 void drawTitle(void);
 void drawText(char *message, int pos);
 void drawAxis(int size);
