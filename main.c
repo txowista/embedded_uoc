@@ -48,6 +48,7 @@
 #include "temp_sensor.h"
 #include "opt3001.h"
 #include "tmp006.h"
+#include "accelerometer_driver.h"
 #include "adc14_multiple_channel_no_repeat.h"
 #include "LcdDriver/Crystalfontz128x128_ST7735.h"
 #include "util.h"
@@ -81,9 +82,9 @@ static TickType_t xBlinkOff;
 SemaphoreHandle_t xMutexI2C;
 SemaphoreHandle_t xMutexBuff;
 SemaphoreHandle_t xMutexSPI;
-// Declaracion de un semaforo binario para la ISR/lectura de buffer
-volatile SemaphoreHandle_t xBinarySemaphoreISR;
-volatile SemaphoreHandle_t xBinarySemaphoreForceG;
+SemaphoreHandle_t xMutexTempForceG;
+// Declaracion de un semaforo binario para la lectura de ADC
+volatile SemaphoreHandle_t xBinarySemaphore;
 
 typedef enum Sensor
 {
@@ -96,10 +97,16 @@ typedef struct
     Sensor sensor;
     float value;
 } Queue_reg_t;
-axis addAxis;
+// Tipo de mensaje a almacenar en la cola
+typedef struct {
+    float acc_x;
+    float acc_y;
+    float acc_z;
+} acc_t;
+acc_t addAxis;
 uint8_t sizeAxis;
 uint8_t buff_pos;
-xQueueHandle xQueueForceG; // Variable para referenciar a la cola
+QueueHandle_t xQueue; // Variable para referenciar a la cola
 QueueHandle_t xQueueLightTemp; // Variable para referenciar a la cola
 float addLight;
 float previousTemp;
@@ -112,27 +119,27 @@ Graphics_Context g_sContext;
 void drawTitle(void);
 void drawText(char *message, int pos);
 void drawAxis(int size);
-void setOrientation(axis *orientationAxis);
+void setOrientation(acc_t *orientationAxis);
 void drawLight(void);
 void drawTemp(void);
 void drawDiffTemp(void);
-void accumulateAxis(axis accInReadAxis);
+void accumulateAxis(acc_t accInReadAxis);
 void accumulateLight(float addInLight);
 void accumulateTemp(float addInTemp);
 int main(void)
 {
     // Inicializacion de semaforo binario
-    xBinarySemaphoreISR = xSemaphoreCreateBinary();
-    xBinarySemaphoreForceG = xSemaphoreCreateBinary();
+    xBinarySemaphore = xSemaphoreCreateBinary();
     // Inicializacio de mutexs
     xMutexI2C = xSemaphoreCreateMutex();
     xMutexBuff = xSemaphoreCreateMutex();
     xMutexSPI = xSemaphoreCreateMutex();
+    xMutexTempForceG = xSemaphoreCreateMutex();
     xBlinkOff = pdMS_TO_TICKS(HEART_BEAT_OFF_MS);
     xBlinkOn = pdMS_TO_TICKS(HEART_BEAT_ON_MS);
 
     // Comprueba si semaforo y mutex se han creado bien
-    if ((xBinarySemaphoreISR != NULL) && (xBinarySemaphoreForceG != NULL)
+    if ((xBinarySemaphore != NULL)
             && (xMutexBuff != NULL) && (xMutexI2C != NULL))
     {
         // Inicializacion del hardware (clocks, GPIOs, IRQs)
@@ -141,7 +148,7 @@ int main(void)
         sizeTemp = 0;
         forceGTempCount= 0;
         forceGTemp = 0;
-        xQueueForceG = xQueueCreate(QUEUE_SIZE, sizeof(axis));
+        xQueue = xQueueCreate(QUEUE_SIZE, sizeof(acc_t));
         xQueueLightTemp = xQueueCreate(QUEUE_SIZE, sizeof(Queue_reg_t));
         // Creacion de tareas
         xTaskCreate(prvTempLightWriterTask, "TempLightWriterTask",
@@ -256,8 +263,8 @@ void drawText(char *message, int pos)
     }
 
 }
-void setOrientation(axis *orientationAxis){
-    if (orientationAxis->x < -0.1)
+void setOrientation(acc_t *orientationAxis){
+    if (orientationAxis->acc_x < -0.1)
     {
         if (Lcd_Orientation != LCD_ORIENTATION_LEFT)
         {
@@ -265,7 +272,7 @@ void setOrientation(axis *orientationAxis){
             drawTitle();
         }
     }
-    else if (orientationAxis->x  > 0.1)
+    else if (orientationAxis->acc_x  > 0.1)
     {
         if (Lcd_Orientation != LCD_ORIENTATION_RIGHT)
         {
@@ -273,7 +280,7 @@ void setOrientation(axis *orientationAxis){
             drawTitle();
         }
     }
-    else if (orientationAxis->y  > 0.1)
+    else if (orientationAxis->acc_y  > 0.1)
     {
         if (Lcd_Orientation != LCD_ORIENTATION_DOWN)
         {
@@ -294,29 +301,29 @@ void drawAxis(int size)
 {
     char message[20];
     char value[10];
-    axis myDrawAxis;
-    myDrawAxis.x=addAxis.x / (float) size;
-    myDrawAxis.y=addAxis.y / (float) size;
-    myDrawAxis.z=addAxis.z / (float) size;
+    acc_t myDrawAxis;
+    myDrawAxis.acc_x=addAxis.acc_x / (float) size;
+    myDrawAxis.acc_y=addAxis.acc_y / (float) size;
+    myDrawAxis.acc_z=addAxis.acc_z / (float) size;
     setOrientation(&myDrawAxis);
     strcpy(message, "Eje X: ");
-    utilFtoa(myDrawAxis.x, value, 1);
+    Accel_ftoa(myDrawAxis.acc_x, value, 2);
     drawText(strcat(message, value), 70);
     strcpy(message, "Eje Y: ");
-    utilFtoa(myDrawAxis.y , value, 1);
+    Accel_ftoa(myDrawAxis.acc_y , value, 2);
     drawText(strcat(message, value), 90);
     strcpy(message, "Eje Z: ");
-    utilFtoa(myDrawAxis.z , value, 1);
+    Accel_ftoa(myDrawAxis.acc_z , value, 2);
     drawText(strcat(message, value), 110);
-    addAxis.x = 0;
-    addAxis.y = 0;
-    addAxis.z = 0;
+    addAxis.acc_x = 0;
+    addAxis.acc_y = 0;
+    addAxis.acc_z = 0;
 }
-void accumulateAxis(axis accInReadAxis)
+void accumulateAxis(acc_t accInReadAxis)
 {
-    addAxis.x += accInReadAxis.x;
-    addAxis.y += accInReadAxis.y;
-    addAxis.z += accInReadAxis.z;
+    addAxis.acc_x += accInReadAxis.acc_x;
+    addAxis.acc_y += accInReadAxis.acc_y;
+    addAxis.acc_z += accInReadAxis.acc_z;
 }
 void accumulateLight(float addInLight)
 {
@@ -438,26 +445,18 @@ static void prvTempLightWriterTask(void *pvParameters)
 //Tarea lectura ADC
 static void prvForceGWriterTask(void *pvParameters)
 {
-
-    const TickType_t xMaxExpectedBlockTime = pdMS_TO_TICKS(500);
-    for (;;)
-    {
+    // Resultado del envio a la cola
+    acc_t queue_element;
+    float Datos[NUM_ADC_CHANNELS];
+    xSemaphoreTake( xBinarySemaphore, 0 );
+    // La tarea se repite en un bucle infinito
+    for(;;) {
+        Accel_read(Datos);
+        queue_element.acc_x = Datos[0];
+        queue_element.acc_y = Datos[1];
+        queue_element.acc_z = Datos[2];
+        xQueueSend(xQueue, &queue_element, portMAX_DELAY);
         vTaskDelay(pdMS_TO_TICKS(DELAY_100_MS));
-        axis *readAxis;
-        readAxis = ADC_read();
-        forceGTempCount++;
-        if(forceGTempCount>=300)
-            if(sizeTemp!=0){
-                forceGTemp=addTemp/sizeTemp;
-            }else{
-                forceGTemp=addTemp;
-            }
-        if ( xSemaphoreTake(xBinarySemaphoreForceG,
-                            xMaxExpectedBlockTime) == pdPASS)
-        {
-            xQueueSend(xQueueForceG, (void * ) readAxis, (TickType_t ) 0);
-        }
-
     }
 }
 
@@ -465,20 +464,32 @@ static void prvForceGWriterTask(void *pvParameters)
 static void prvReaderTask(void *pvParameters)
 {
     Queue_reg_t queueRegister;
-    axis writeAxis;
+    acc_t queue_element;
     sizeAxis = 0;
     int size = 0;
-    addAxis.x = 0;
-    addAxis.y = 0;
-    addAxis.z = 0;
+    queue_element.acc_x = 0;
+    queue_element.acc_y = 0;
+    queue_element.acc_z = 0;
     for (;;)
     {
-        vTaskDelay(pdMS_TO_TICKS(ONE_SECOND_MS));
-
         size = 0;
-        // El semaforo debe ser entregado por la ISR PORT1_IRQHandler
-        // Espera un numero maximo de xMaxExpectedBlockTime ticks
-
+        vTaskDelay(pdMS_TO_TICKS(ONE_SECOND_MS));
+        forceGTempCount++;
+        if(forceGTempCount>=30){
+            forceGTempCount=0;
+            if (xSemaphoreTake(xMutexTempForceG, portMAX_DELAY))
+            {
+                if (sizeTemp != 0)
+                {
+                    forceGTemp = addTemp / sizeTemp;
+                }
+                else
+                {
+                    forceGTemp = addTemp;
+                }
+                xSemaphoreGive(xMutexTempForceG);
+            }
+        }
         if (xSemaphoreTake(xMutexBuff, portMAX_DELAY))
         {
             while (xQueueReceive(xQueueLightTemp, &queueRegister,
@@ -496,10 +507,10 @@ static void prvReaderTask(void *pvParameters)
             }
             xSemaphoreGive(xMutexBuff);
         }
-        size = uxQueueMessagesWaiting(xQueueForceG);
-        while (xQueueReceive(xQueueForceG, &writeAxis, 0))
+        size = uxQueueMessagesWaiting(xQueue);
+        while (xQueueReceive(xQueue, &queue_element, 0))
         {
-            accumulateAxis(writeAxis);
+            accumulateAxis(queue_element);
         }
         drawAxis(size);
 

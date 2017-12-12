@@ -64,11 +64,18 @@
 #include "driverlib.h"
 /* Standard Includes */
 #include <string.h>
-extern float forceGTemp;
-extern SemaphoreHandle_t xBinarySemaphoreForceG;
+
+// Includes FreeRTOS
+#include "FreeRTOS.h"
+#include "semphr.h"
+
 uint16_t resultsBuffer[NUM_ADC_CHANNELS];
-enum axisType currentAxis;
-void init_ADC(){
+extern SemaphoreHandle_t xBinarySemaphore;
+
+
+void init_ADC(void){
+
+
     /* Zero-filling buffer */
     memset(resultsBuffer, 0x00, NUM_ADC_CHANNELS);
 
@@ -86,11 +93,11 @@ void init_ADC(){
 
 
     /* Configuring ADC Memory (ADC_MEM0 - ADC_MEM2 (A14, A13, A11)  with no repeat)
-     * with internal 3.3v reference */
+     * with internal 2.5v reference */
     MAP_ADC14_configureMultiSequenceMode(ADC_MEM0, ADC_MEM2, false);
     MAP_ADC14_configureConversionMemory(ADC_MEM0, ADC_VREFPOS_AVCC_VREFNEG_VSS, ADC_INPUT_A14, false);
     MAP_ADC14_configureConversionMemory(ADC_MEM1, ADC_VREFPOS_AVCC_VREFNEG_VSS, ADC_INPUT_A13, false);
-    MAP_ADC14_configureConversionMemory(ADC_MEM2, ADC_VREFPOS_AVCC_VREFNEG_VSS, ADC_INPUT_A11, false);
+    MAP_ADC14_configureConversionMemory(ADC_MEM2, ADC_VREFPOS_AVCC_VREFNEG_VSS, ADC_INPUT_A11, false); //ADC_VREFPOS_AVCC_VREFNEG_VSS -- ADC_VREFPOS_INTBUF_VREFNEG_VSS
 
 
     /* Enabling the interrupt when a conversion on channel 2 (end of sequence)
@@ -98,11 +105,11 @@ void init_ADC(){
     // Corresponde a ADC_MEM2
     MAP_ADC14_enableInterrupt(ADC_INT2);
 
+    // Configura la prioridad de la interrupcion del ADC14
+    MAP_Interrupt_setPriority(INT_ADC14, 0xA0);
+
     /* Enabling Interrupts */
     MAP_Interrupt_enableInterrupt(INT_ADC14);
-    /*Cambiamos la prioridad de la interrupcion*/
-    Interrupt_setPriority(INT_ADC14, 160);
-
     //MAP_Interrupt_enableMaster();
 
     /* Setting up the sample timer to automatically step through the sequence
@@ -111,32 +118,14 @@ void init_ADC(){
     MAP_ADC14_enableSampleTimer(ADC_AUTOMATIC_ITERATION);
 }
 
-axis *ADC_read(void){
+uint16_t *ADC_read(void){
     /* Triggering the start of the sample */
     MAP_ADC14_enableConversion();
     MAP_ADC14_toggleConversionTrigger();
-    return &readAxis;
+    if( xSemaphoreTake( xBinarySemaphore, portMAX_DELAY ) == pdPASS );
+    return resultsBuffer;
 }
-float correctTemp(float temp2modified, enum axisType currentAxis){
-    float temp=REFERENCE_TEMP-temp2modified;
-    if(currentAxis==z){
-        return (0.0004f*temp);
-    }else{
-        return (0.0007f*temp);
-    }
-}
-/* Espacio de representacion del ADC 2^14= 16384
- * Recorrido del aceleremetro 6G (-3G +3G)
- * Estado de reposo 0G
- * 16384 / 6 = 2730 puntos por G
- * Desplazamiento hasta el reposo 3
- * Por tanto: Input / 2730 - 3 = Ouput (Fuerza G experimentada por el eje)
- */
-void convertBuffer(void){
-    readAxis.x = (((float) resultsBuffer[x] -CONVERSION_OFFSET)/CONVERSION_SCALE)*(1+correctTemp(forceGTemp,x));
-    readAxis.y = (((float) resultsBuffer[y] -CONVERSION_OFFSET)/CONVERSION_SCALE)*(1+correctTemp(forceGTemp,y));
-    readAxis.z = (((float) resultsBuffer[z] -CONVERSION_OFFSET)/CONVERSION_SCALE)*(1+correctTemp(forceGTemp,z));
-}
+
 /* This interrupt is fired whenever a conversion is completed and placed in
  * ADC_MEM2. This signals the end of conversion and the results array is
  * grabbed and placed in resultsBuffer */
@@ -144,21 +133,28 @@ void ADC14_IRQHandler(void)
 {
     uint64_t status;
     static BaseType_t xHigherPriorityTaskWoken;
+
     status = MAP_ADC14_getEnabledInterruptStatus();
     MAP_ADC14_clearInterruptFlag(status);
+
     if(status & ADC_INT2)
     {
         MAP_ADC14_getMultiSequenceResult(resultsBuffer);
-        convertBuffer();
+        // El par�metro xHigherPriorityTaskWoken debe inicializarse en pdFALSE,
+        // ya que se establecer� en pdTRUE dentro de la funci�n API de interrupci�n
+        // segura si se requiere un cambio de contexto
         xHigherPriorityTaskWoken = pdFALSE;
-        xSemaphoreGiveFromISR(xBinarySemaphoreForceG,&xHigherPriorityTaskWoken);
+        // Entrega el semaforo desde la ISR para desbloquear la tarea SenderTask
+        xSemaphoreGiveFromISR( xBinarySemaphore, &xHigherPriorityTaskWoken );
+
+        // Pasa el valor xHigherPriorityTaskWoken en portYIELD_FROM_ISR().
+        // Si xHigherPriorityTaskWoken se estableci� en pdTRUE dentro de
+        // xSemaphoreGiveFromISR(), entonces al llamar a portYIELD_FROM_ISR()
+        // solicitar� un cambio de contexto. Si xHigherPriorityTaskWoken sigue
+        // siendo pdFALSE, entonces la llamada a portYIELD_FROM_ISR() no tendr�
+        // ning�n efecto
         portYIELD_FROM_ISR( xHigherPriorityTaskWoken );
     }
-
 }
-
-
-
-
 
 
