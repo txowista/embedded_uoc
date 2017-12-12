@@ -69,7 +69,6 @@
 
 #define DEBUG_MSG 0
 
-
 // Prototipos de funciones privadas
 static void prvSetupHardware(void);
 static void prvTempLightWriterTask(void *pvParameters);
@@ -98,14 +97,14 @@ typedef struct
     float value;
 } Queue_reg_t;
 // Tipo de mensaje a almacenar en la cola
-typedef struct {
+typedef struct
+{
     float acc_x;
     float acc_y;
     float acc_z;
 } acc_t;
 acc_t addAxis;
 uint8_t sizeAxis;
-uint8_t buff_pos;
 QueueHandle_t xQueue; // Variable para referenciar a la cola
 QueueHandle_t xQueueLightTemp; // Variable para referenciar a la cola
 float addLight;
@@ -139,30 +138,35 @@ int main(void)
     xBlinkOn = pdMS_TO_TICKS(HEART_BEAT_ON_MS);
 
     // Comprueba si semaforo y mutex se han creado bien
-    if ((xBinarySemaphore != NULL)
-            && (xMutexBuff != NULL) && (xMutexI2C != NULL))
+    if ((xBinarySemaphore != NULL) && (xMutexBuff != NULL)
+            && (xMutexSPI != NULL) && (xMutexTempForceG != NULL)
+            && (xMutexI2C != NULL))
     {
         // Inicializacion del hardware (clocks, GPIOs, IRQs)
         prvSetupHardware();
-        buff_pos = 0;
         sizeTemp = 0;
-        forceGTempCount= 0;
-        forceGTemp = 0;
+        forceGTempCount = 0;
+        forceGTemp = 20;
         xQueue = xQueueCreate(QUEUE_SIZE, sizeof(acc_t));
         xQueueLightTemp = xQueueCreate(QUEUE_SIZE, sizeof(Queue_reg_t));
         // Creacion de tareas
         xTaskCreate(prvTempLightWriterTask, "TempLightWriterTask",
-                    configMINIMAL_STACK_SIZE, NULL,
+        configMINIMAL_STACK_SIZE,
+                    NULL,
                     WRITER_TASK_PRIORITY,
                     NULL);
         xTaskCreate(prvForceGWriterTask, "ForceGWriterTask",
-                    configMINIMAL_STACK_SIZE, NULL,
+        configMINIMAL_STACK_SIZE,
+                    NULL,
                     WRITER_TASK_PRIORITY,
                     NULL);
-        xTaskCreate(prvReaderTask, "ReaderTask", configMEDIUM_STACK_SIZE, NULL,
-        READER_TASK_PRIORITY,
+        xTaskCreate(prvReaderTask, "ReaderTask",
+        configMEDIUM_STACK_SIZE,
+                    NULL,
+                    READER_TASK_PRIORITY,
                     NULL);
-        xTaskCreate(prvHeartBeatTask, "HeartBeatTask", configMINIMAL_STACK_SIZE,
+        xTaskCreate(prvHeartBeatTask, "HeartBeatTask",
+        configMINIMAL_STACK_SIZE,
                     NULL,
                     HEARTBEAT_TASK_PRIORITY,
                     NULL);
@@ -254,17 +258,16 @@ void drawText(char *message, int pos)
 {
     if (xSemaphoreTake(xMutexSPI, portMAX_DELAY))
     {
-//        MAP_Interrupt_disableMaster();
         Graphics_drawStringCentered(&g_sContext, (int8_t *) message,
         AUTO_STRING_LENGTH,
                                     64, pos, OPAQUE_TEXT);
-//        MAP_Interrupt_enableMaster();
         xSemaphoreGive(xMutexSPI);
     }
 
 }
-void setOrientation(acc_t *orientationAxis){
-    if (orientationAxis->acc_x < -0.1)
+void setOrientation(acc_t *orientationAxis)
+{
+    if (orientationAxis->acc_x < -0.2)
     {
         if (Lcd_Orientation != LCD_ORIENTATION_LEFT)
         {
@@ -272,7 +275,7 @@ void setOrientation(acc_t *orientationAxis){
             drawTitle();
         }
     }
-    else if (orientationAxis->acc_x  > 0.1)
+    else if (orientationAxis->acc_x > 0.2)
     {
         if (Lcd_Orientation != LCD_ORIENTATION_RIGHT)
         {
@@ -280,7 +283,7 @@ void setOrientation(acc_t *orientationAxis){
             drawTitle();
         }
     }
-    else if (orientationAxis->acc_y  > 0.1)
+    else if (orientationAxis->acc_y > 0.2)
     {
         if (Lcd_Orientation != LCD_ORIENTATION_DOWN)
         {
@@ -302,20 +305,20 @@ void drawAxis(int size)
     char message[20];
     char value[10];
     acc_t myDrawAxis;
-    myDrawAxis.acc_x=addAxis.acc_x / (float) size;
-    myDrawAxis.acc_y=addAxis.acc_y / (float) size;
-    myDrawAxis.acc_z=addAxis.acc_z / (float) size;
+    myDrawAxis.acc_x = addAxis.acc_x / (float) size;
+    myDrawAxis.acc_y = addAxis.acc_y / (float) size;
+    myDrawAxis.acc_z = addAxis.acc_z / (float) size;
     setOrientation(&myDrawAxis);
     strcpy(message, "  Eje X: ");
     Accel_ftoa(myDrawAxis.acc_x, value, 2);
     strcat(message, value);
     drawText(strcat(message, "  "), 70);
     strcpy(message, "  Eje Y: ");
-    Accel_ftoa(myDrawAxis.acc_y , value, 2);
+    Accel_ftoa(myDrawAxis.acc_y, value, 2);
     strcat(message, value);
     drawText(strcat(message, "  "), 90);
     strcpy(message, "  Eje Z: ");
-    Accel_ftoa(myDrawAxis.acc_z , value, 2);
+    Accel_ftoa(myDrawAxis.acc_z, value, 2);
     strcat(message, value);
     drawText(strcat(message, "  "), 110);
     addAxis.acc_x = 0;
@@ -353,18 +356,22 @@ void drawLight(void)
 }
 void accumulateTemp(float addInTemp)
 {
-    addTemp += addInTemp;
-    sizeTemp++;
-    if (sizeTemp >= TEMP_SIZE)
+    if (xSemaphoreTake(xMutexTempForceG, portMAX_DELAY))
     {
-        addTemp /= TEMP_SIZE;
-        sizeTemp = 0;
-        drawTemp();
-        if (previousTemp != 0)
+        addTemp += addInTemp;
+        sizeTemp++;
+        if (sizeTemp >= TEMP_SIZE)
         {
-            drawDiffTemp();
+            addTemp /= TEMP_SIZE;
+            sizeTemp = 0;
+            drawTemp();
+            if (previousTemp != 0)
+            {
+                drawDiffTemp();
+            }
+            previousTemp = addTemp;
         }
-        previousTemp = addTemp;
+        xSemaphoreGive(xMutexTempForceG);
     }
 }
 void drawTemp()
@@ -381,7 +388,7 @@ void drawDiffTemp()
     char message[25];
     char value[10];
     strcpy(message, "  T Previous: ");
-    ftoa(addTemp - previousTemp, value, 2);
+    Accel_ftoa(addTemp - previousTemp, value, 2);
     strcat(message, value);
     drawText(strcat(message, "  "), 50);
 }
@@ -454,14 +461,34 @@ static void prvForceGWriterTask(void *pvParameters)
     // Resultado del envio a la cola
     acc_t queue_element;
     float Datos[NUM_ADC_CHANNELS];
-    xSemaphoreTake( xBinarySemaphore, 0 );
+    xSemaphoreTake(xBinarySemaphore, 0);
     // La tarea se repite en un bucle infinito
-    for(;;) {
+    for (;;)
+    {
+        forceGTempCount++;
+        if (forceGTempCount >= 30)
+        {
+            forceGTempCount = 0;
+            if (xSemaphoreTake(xMutexTempForceG, portMAX_DELAY))
+            {
+                if (sizeTemp != 0)
+                {
+                    forceGTemp = addTemp / sizeTemp;
+                }
+                else
+                {
+                    forceGTemp = addTemp;
+                }
+                xSemaphoreGive(xMutexTempForceG);
+            }
+        }
         Accel_read(Datos);
         queue_element.acc_x = Datos[0];
         queue_element.acc_y = Datos[1];
         queue_element.acc_z = Datos[2];
+
         xQueueSend(xQueue, &queue_element, portMAX_DELAY);
+
         vTaskDelay(pdMS_TO_TICKS(DELAY_100_MS));
     }
 }
@@ -480,22 +507,6 @@ static void prvReaderTask(void *pvParameters)
     {
         size = 0;
         vTaskDelay(pdMS_TO_TICKS(ONE_SECOND_MS));
-        forceGTempCount++;
-        if(forceGTempCount>=30){
-            forceGTempCount=0;
-            if (xSemaphoreTake(xMutexTempForceG, portMAX_DELAY))
-            {
-                if (sizeTemp != 0)
-                {
-                    forceGTemp = addTemp / sizeTemp;
-                }
-                else
-                {
-                    forceGTemp = addTemp;
-                }
-                xSemaphoreGive(xMutexTempForceG);
-            }
-        }
         if (xSemaphoreTake(xMutexBuff, portMAX_DELAY))
         {
             while (xQueueReceive(xQueueLightTemp, &queueRegister,
@@ -513,6 +524,7 @@ static void prvReaderTask(void *pvParameters)
             }
             xSemaphoreGive(xMutexBuff);
         }
+
         size = uxQueueMessagesWaiting(xQueue);
         while (xQueueReceive(xQueue, &queue_element, 0))
         {

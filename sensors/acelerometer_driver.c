@@ -13,7 +13,7 @@
 
 #include "accelerometer_driver.h"
 #include "adc14_multiple_channel_no_repeat.h"
-
+extern float forceGTemp;
 /* Reverses a string 'str' of length 'len' */
 void Accel_reverse(char *str, int len)
 {
@@ -91,16 +91,22 @@ void init_Accel(void){
     init_ADC();
 }
 
+float Accel_correctTemp(float temp2modified, enum axisType currentAxis){
+    float temp=REFERENCE_TEMP-temp2modified;
+    if(currentAxis==z){
+        return (0.0001f*temp);
+    }else{
+        return (0.0004f*temp);
+    }
+}
 void Accel_read(float *values){
     uint16_t *Data;
     uint8_t i;
-
     //pedir datos ADC
     Data = ADC_read();
-
     //realizar conversion
     for (i=0;i<NUM_ADC_CHANNELS;i++){
-        values[i] = ((float)Data[i]-CONVERSION_OFFSET)/CONVERSION_SCALE;
+        values[i] = (((float)Data[i]-CONVERSION_OFFSET)/CONVERSION_SCALE)*(1+Accel_correctTemp(forceGTemp,i));
     }
 
 }
