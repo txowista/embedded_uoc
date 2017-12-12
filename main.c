@@ -254,11 +254,11 @@ void drawText(char *message, int pos)
 {
     if (xSemaphoreTake(xMutexSPI, portMAX_DELAY))
     {
-        MAP_Interrupt_disableMaster();
+//        MAP_Interrupt_disableMaster();
         Graphics_drawStringCentered(&g_sContext, (int8_t *) message,
         AUTO_STRING_LENGTH,
                                     64, pos, OPAQUE_TEXT);
-        MAP_Interrupt_enableMaster();
+//        MAP_Interrupt_enableMaster();
         xSemaphoreGive(xMutexSPI);
     }
 
@@ -306,15 +306,18 @@ void drawAxis(int size)
     myDrawAxis.acc_y=addAxis.acc_y / (float) size;
     myDrawAxis.acc_z=addAxis.acc_z / (float) size;
     setOrientation(&myDrawAxis);
-    strcpy(message, "Eje X: ");
+    strcpy(message, "  Eje X: ");
     Accel_ftoa(myDrawAxis.acc_x, value, 2);
-    drawText(strcat(message, value), 70);
-    strcpy(message, "Eje Y: ");
+    strcat(message, value);
+    drawText(strcat(message, "  "), 70);
+    strcpy(message, "  Eje Y: ");
     Accel_ftoa(myDrawAxis.acc_y , value, 2);
-    drawText(strcat(message, value), 90);
-    strcpy(message, "Eje Z: ");
+    strcat(message, value);
+    drawText(strcat(message, "  "), 90);
+    strcpy(message, "  Eje Z: ");
     Accel_ftoa(myDrawAxis.acc_z , value, 2);
-    drawText(strcat(message, value), 110);
+    strcat(message, value);
+    drawText(strcat(message, "  "), 110);
     addAxis.acc_x = 0;
     addAxis.acc_y = 0;
     addAxis.acc_z = 0;
@@ -343,9 +346,10 @@ void drawLight(void)
 {
     char message[20];
     char value[10];
-    strcpy(message, "Luz: ");
+    strcpy(message, "  Luz: ");
     ftoa(addLight, value, 2);
-    drawText(strcat(message, value), 30);
+    strcat(message, value);
+    drawText(strcat(message, "  "), 30);
 }
 void accumulateTemp(float addInTemp)
 {
@@ -367,17 +371,19 @@ void drawTemp()
 {
     char message[20];
     char value[10];
-    strcpy(message, "Temp: ");
+    strcpy(message, "  Temp: ");
     ftoa(addTemp, value, 2);
-    drawText(strcat(message, value), 40);
+    strcat(message, value);
+    drawText(strcat(message, "  "), 40);
 }
 void drawDiffTemp()
 {
-    char message[20];
+    char message[25];
     char value[10];
-    strcpy(message, "T Previous: ");
+    strcpy(message, "  T Previous: ");
     ftoa(addTemp - previousTemp, value, 2);
-    drawText(strcat(message, value), 50);
+    strcat(message, value);
+    drawText(strcat(message, "  "), 50);
 }
 
 //Tarea heart beat
