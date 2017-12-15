@@ -32,7 +32,7 @@
 //
 //*****************************************************************************
 
-// Includes standard
+// Includes standard C
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
@@ -43,7 +43,7 @@
 #include "queue.h"
 #include "semphr.h"
 
-// Includes drivers
+// Includes drivers peripherical
 #include "i2c_driver.h"
 #include "temp_sensor.h"
 #include "opt3001.h"
@@ -63,16 +63,21 @@
 #define HEART_BEAT_ON_MS 10
 #define HEART_BEAT_OFF_MS 990
 #define TEMP_SIZE 60
+#define FORCEG_TEMP_SIZE 30
+#define TEMP_INIT_FORCEG 20
+#define ROTATION_THRESHOLD 0.2
+#define TITLE_LINE 10
+#define LIGHT_LINE 30
+#define TEMP_LINE 40
+#define PREVIOUS_TEMP_LINE 50
+#define EJEX_LINE 70
+#define EJEY_LINE 90
+#define EJEZ_LINE 110
+#define NUMBER_OF_DECIMAL 2
 
-// Prototipos de funciones privadas
-static void prvSetupHardware(void);
-static void prvTempLightWriterTask(void *pvParameters);
-static void prvForceGWriterTask(void *pvParameters);
-static void prvReaderTask(void *pvParameters);
-static void prvHeartBeatTask(void *pvParameters);
 static TickType_t xBlinkOn;
 static TickType_t xBlinkOff;
-// Declaracion de un mutex para acceso unico a I2C, UART y buffer
+// Declaracion de un mutex para acceso unico a I2C, UART ,buffer y TempForceG
 SemaphoreHandle_t xMutexI2C;
 SemaphoreHandle_t xMutexBuff;
 SemaphoreHandle_t xMutexSPI;
@@ -90,8 +95,7 @@ typedef struct
 {
     Sensor sensor;
     float value;
-} Queue_reg_t;
-// Tipo de mensaje a almacenar en la cola
+} Queue_reg_t; // Tipo de mensaje a almacenar en la cola
 typedef struct
 {
     float acc_x;
@@ -99,28 +103,31 @@ typedef struct
     float acc_z;
 } acc_t;
 acc_t addAxis;
-uint8_t sizeAxis;
-QueueHandle_t xQueue; // Variable para referenciar a la cola
-QueueHandle_t xQueueLightTemp; // Variable para referenciar a la cola
-float addLight;
-float previousTemp;
-float addTemp;
-float forceGTemp;
-int sizeTemp;
-int forceGTempCount;
-/* Graphic library context */
-Graphics_Context g_sContext;
-//Funciones
-void drawTitle(void);
-void drawText(char *message, int pos);
-void drawAxis(int size);
-void setOrientation(acc_t *orientationAxis);
-void drawLight(void);
-void drawTemp(void);
-void drawDiffTemp(void);
-void accumulateAxis(acc_t accInReadAxis);
-void accumulateLight(float addInLight);
-void accumulateTemp(float addInTemp);
+QueueHandle_t xQueue; // Variable para referenciar a la cola, de los valores de la aceleracion
+QueueHandle_t xQueueLightTemp; // Variable para referenciar a la cola, de los valores de temperatura y luz
+float addLight; //Variable global acumulador para los datos de Luz
+float previousTemp; //Variable global para la temperatura previa
+float addTemp; //Variable global acumulador para los datos de temperatura
+float forceGTemp; //Variable global temperatura correccion datos del acelerometro
+uint8_t tempCount; //Contador para el acumulador de temperatura
+uint8_t forceGTempCount; //Contador para el acumulador de temperatura correccion datos del acelerometro
+Graphics_Context g_sContext; //Contexto para la libreria grafica
+// Prototipos de funciones privadas
+static void prvSetupHardware(void); //Seteo de hardware
+static void prvTempLightWriterTask(void *pvParameters); //Tarea obtencion datos de Luz y Temperatura
+static void prvForceGWriterTask(void *pvParameters); //Tarea obtencion datos de aceleracion
+static void prvReaderTask(void *pvParameters); //Tarea lectura de datos de las colas para su impresion en pantalla
+static void prvHeartBeatTask(void *pvParameters); //Tarea de latido del led
+static void drawTitle(void); //Presenta en pantalla el titulo en pantalla
+static void drawText(char *message, int pos); //Presenta en pantalla en funcion de un texto y una posicion
+static void drawAxis(int size); //Presenta en pantalla datos del acelerometro
+static void setOrientation(acc_t *orientationAxis); //Cambia orientacion de pantalla en funcion de datos del acelerometro
+static void drawLight(void); //Presenta en pantalla media del sensor de luz
+static void drawTemp(void); //Presenta en pantalla media del sensor de temperatura
+static void drawDiffTemp(void); //Presenta en pantalla temperatura anterior
+static void summatoryAxis(acc_t accInReadAxis); //Acumula los datos de la cola del acelerometro para obtener media
+static void summatoryLight(float addInLight); //Acumula los datos de la cola del sensor de luz para obtener media
+static void summatoryTemp(float addInTemp); //Acumula los datos dela cola del sensor de temperatura para obtener media
 int main(void)
 {
     // Inicializacion de semaforo binario
@@ -133,16 +140,18 @@ int main(void)
     xBlinkOff = pdMS_TO_TICKS(HEART_BEAT_OFF_MS);
     xBlinkOn = pdMS_TO_TICKS(HEART_BEAT_ON_MS);
 
-    // Comprueba si semaforo y mutex se han creado bien
+    // Comprueba si semaforo y mutexs se han creado bien
     if ((xBinarySemaphore != NULL) && (xMutexBuff != NULL)
             && (xMutexSPI != NULL) && (xMutexTempForceG != NULL)
             && (xMutexI2C != NULL))
     {
         // Inicializacion del hardware (clocks, GPIOs, IRQs)
         prvSetupHardware();
-        sizeTemp = 0;
+        //Seteo de varibales
+        tempCount = 0;
         forceGTempCount = 0;
-        forceGTemp = 20;
+        forceGTemp = TEMP_INIT_FORCEG;
+        //Creacion de las colas
         xQueue = xQueueCreate(QUEUE_SIZE, sizeof(acc_t));
         xQueueLightTemp = xQueueCreate(QUEUE_SIZE, sizeof(Queue_reg_t));
         // Creacion de tareas
@@ -157,7 +166,7 @@ int main(void)
                     WRITER_TASK_PRIORITY,
                     NULL);
         xTaskCreate(prvReaderTask, "ReaderTask",
-        configMEDIUM_STACK_SIZE,
+        configMEDIUM_STACK_SIZE, //Necesario mayor tamaño de stack debido a la carga de memoria
                     NULL,
                     READER_TASK_PRIORITY,
                     NULL);
@@ -223,34 +232,33 @@ static void prvSetupHardware(void)
     sensorOpt3001Init();
     sensorOpt3001Enable(true);
 
-    /* Initializes display */
+    //Inicializacion del display
     Crystalfontz128x128_Init();
 
-    /* Set default screen orientation */
+    //Orientacion por defecto del display
     Crystalfontz128x128_SetOrientation(LCD_ORIENTATION_UP);
-    /* Initializes graphics context */
+    //Inicializacion contexto libreria grafica
     Graphics_initContext(&g_sContext, &g_sCrystalfontz128x128,
                          &g_sCrystalfontz128x128_funcs);
     Graphics_setForegroundColor(&g_sContext, GRAPHICS_COLOR_RED);
     Graphics_setBackgroundColor(&g_sContext, GRAPHICS_COLOR_WHITE);
     GrContextFontSet(&g_sContext, &g_sFontFixed6x8);
 
-    drawTitle();
     //Inicializa ADC
     init_ADC();
     // Habilita que el procesador responda a las interrupciones
     MAP_Interrupt_enableMaster();
+    //Mostramos en pantalla el titulo
+    drawTitle();
 }
-/*
- * Clear display and redraw title + accelerometer data
- */
-void drawTitle()
+
+static void drawTitle()
 {
     Graphics_clearDisplay(&g_sContext);
     drawText("PRAC IGOR G.L.:", 10);
 
 }
-void drawText(char *message, int pos)
+static void drawText(char *message, int pos)
 {
     if (xSemaphoreTake(xMutexSPI, portMAX_DELAY))
     {
@@ -261,9 +269,9 @@ void drawText(char *message, int pos)
     }
 
 }
-void setOrientation(acc_t *orientationAxis)
+static void setOrientation(acc_t *orientationAxis)
 {
-    if (orientationAxis->acc_x < -0.2)
+    if (orientationAxis->acc_x < -ROTATION_THRESHOLD)
     {
         if (Lcd_Orientation != LCD_ORIENTATION_LEFT)
         {
@@ -271,7 +279,7 @@ void setOrientation(acc_t *orientationAxis)
             drawTitle();
         }
     }
-    else if (orientationAxis->acc_x > 0.2)
+    else if (orientationAxis->acc_x > ROTATION_THRESHOLD)
     {
         if (Lcd_Orientation != LCD_ORIENTATION_RIGHT)
         {
@@ -279,7 +287,7 @@ void setOrientation(acc_t *orientationAxis)
             drawTitle();
         }
     }
-    else if (orientationAxis->acc_y > 0.2)
+    else if (orientationAxis->acc_y > ROTATION_THRESHOLD)
     {
         if (Lcd_Orientation != LCD_ORIENTATION_DOWN)
         {
@@ -296,38 +304,41 @@ void setOrientation(acc_t *orientationAxis)
         }
     }
 }
-void drawAxis(int size)
+static void drawAxis(int size)
 {
     char message[20];
     char value[10];
     acc_t myDrawAxis;
+    //Obtencion media
     myDrawAxis.acc_x = addAxis.acc_x / (float) size;
     myDrawAxis.acc_y = addAxis.acc_y / (float) size;
     myDrawAxis.acc_z = addAxis.acc_z / (float) size;
+    //Orientacion pantalla
     setOrientation(&myDrawAxis);
+    //Formateo de textos
     strcpy(message, "  Eje X: ");
-    Accel_ftoa(myDrawAxis.acc_x, value, 2);
+    Accel_ftoa(myDrawAxis.acc_x, value, NUMBER_OF_DECIMAL);
     strcat(message, value);
-    drawText(strcat(message, "  "), 70);
+    drawText(strcat(message, "  "), EJEX_LINE);
     strcpy(message, "  Eje Y: ");
-    Accel_ftoa(myDrawAxis.acc_y, value, 2);
+    Accel_ftoa(myDrawAxis.acc_y, value, NUMBER_OF_DECIMAL);
     strcat(message, value);
-    drawText(strcat(message, "  "), 90);
+    drawText(strcat(message, "  "), EJEY_LINE);
     strcpy(message, "  Eje Z: ");
-    Accel_ftoa(myDrawAxis.acc_z, value, 2);
+    Accel_ftoa(myDrawAxis.acc_z, value, NUMBER_OF_DECIMAL);
     strcat(message, value);
-    drawText(strcat(message, "  "), 110);
+    drawText(strcat(message, "  "), EJEZ_LINE);
     addAxis.acc_x = 0;
     addAxis.acc_y = 0;
     addAxis.acc_z = 0;
 }
-void accumulateAxis(acc_t accInReadAxis)
+static void summatoryAxis(acc_t accInReadAxis)
 {
     addAxis.acc_x += accInReadAxis.acc_x;
     addAxis.acc_y += accInReadAxis.acc_y;
     addAxis.acc_z += accInReadAxis.acc_z;
 }
-void accumulateLight(float addInLight)
+static void summatoryLight(float addInLight)
 {
     if (addLight == 0)
     {
@@ -341,26 +352,28 @@ void accumulateLight(float addInLight)
         addLight = 0;
     }
 }
-void drawLight(void)
+static void drawLight(void)
 {
     char message[20];
     char value[10];
     strcpy(message, "  Luz: ");
     ftoa(addLight, value, 2);
     strcat(message, value);
-    drawText(strcat(message, "  "), 30);
+    drawText(strcat(message, "  "), LIGHT_LINE);
 }
-void accumulateTemp(float addInTemp)
+static void summatoryTemp(float addInTemp)
 {
     if (xSemaphoreTake(xMutexTempForceG, portMAX_DELAY))
     {
         addTemp += addInTemp;
-        sizeTemp++;
-        if (sizeTemp >= TEMP_SIZE)
+        tempCount++;
+        //Obtencion de 60 muestras antes de presentarlas en pantallas
+        if (tempCount >= TEMP_SIZE)
         {
             addTemp /= TEMP_SIZE;
-            sizeTemp = 0;
+            tempCount = 0;
             drawTemp();
+            //Presentacion de la temperatura previa
             if (previousTemp != 0)
             {
                 drawDiffTemp();
@@ -370,23 +383,23 @@ void accumulateTemp(float addInTemp)
         xSemaphoreGive(xMutexTempForceG);
     }
 }
-void drawTemp()
+static void drawTemp()
 {
     char message[20];
     char value[10];
     strcpy(message, "  Temp: ");
-    ftoa(addTemp, value, 2);
+    ftoa(addTemp, value, NUMBER_OF_DECIMAL);
     strcat(message, value);
-    drawText(strcat(message, "  "), 40);
+    drawText(strcat(message, "  "), TEMP_LINE);
 }
-void drawDiffTemp()
+static void drawDiffTemp()
 {
     char message[25];
     char value[10];
     strcpy(message, "  T Previous: ");
-    Accel_ftoa(addTemp - previousTemp, value, 2);
+    Accel_ftoa(addTemp - previousTemp, value, NUMBER_OF_DECIMAL);
     strcat(message, value);
-    drawText(strcat(message, "  "), 50);
+    drawText(strcat(message, "  "), PREVIOUS_TEMP_LINE);
 }
 
 //Tarea heart beat
@@ -394,6 +407,7 @@ static void prvHeartBeatTask(void *pvParameters)
 {
     for (;;)
     {
+        //Cambiamos el estado de la GPIO
         MAP_GPIO_toggleOutputOnPin(GPIO_PORT_P1, GPIO_PIN0);
         vTaskDelay(xBlinkOn);
         MAP_GPIO_toggleOutputOnPin(GPIO_PORT_P1, GPIO_PIN0);
@@ -409,14 +423,14 @@ static void prvTempLightWriterTask(void *pvParameters)
     uint16_t rawData;
     float convertedLux;
     float temperature;
-    int par = 0;
+    uint8_t par = 0;
     for (;;)
     {
         par++;
         vTaskDelay(pdMS_TO_TICKS(DELAY_500_MS));
-        // Intenta coger el mutex, bloqueandose si no esta disponible
         if (par >= 2)
         {
+            // Intenta coger el mutex, bloqueandose si no esta disponible
             xSemaphoreTake(xMutexI2C, portMAX_DELAY);
             {
                 // Lee el valor de la medida de temperatura
@@ -457,19 +471,21 @@ static void prvForceGWriterTask(void *pvParameters)
     // Resultado del envio a la cola
     acc_t queue_element;
     float Datos[NUM_ADC_CHANNELS];
+    // Intenta coger el semaforo, bloqueandose si no esta disponible
     xSemaphoreTake(xBinarySemaphore, 0);
     // La tarea se repite en un bucle infinito
     for (;;)
     {
         forceGTempCount++;
-        if (forceGTempCount >= 30)
+        if (forceGTempCount >= FORCEG_TEMP_SIZE)
         {
             forceGTempCount = 0;
+            // Intenta coger el mutex, bloqueandose si no esta disponible
             if (xSemaphoreTake(xMutexTempForceG, portMAX_DELAY))
             {
-                if (sizeTemp != 0)
+                if (tempCount != 0)
                 {
-                    forceGTemp = addTemp / sizeTemp;
+                    forceGTemp = addTemp / tempCount;
                 }
                 else
                 {
@@ -478,13 +494,13 @@ static void prvForceGWriterTask(void *pvParameters)
                 xSemaphoreGive(xMutexTempForceG);
             }
         }
+        //Funcion que recoge los valores del acelerometro
         Accel_read(Datos);
-        queue_element.acc_x = Datos[0];
-        queue_element.acc_y = Datos[1];
-        queue_element.acc_z = Datos[2];
-
+        queue_element.acc_x = Datos[x];
+        queue_element.acc_y = Datos[y];
+        queue_element.acc_z = Datos[z];
+        //Insercion en la cola
         xQueueSend(xQueue, &queue_element, portMAX_DELAY);
-
         vTaskDelay(pdMS_TO_TICKS(DELAY_100_MS));
     }
 }
@@ -494,39 +510,37 @@ static void prvReaderTask(void *pvParameters)
 {
     Queue_reg_t queueRegister;
     acc_t queue_element;
-    sizeAxis = 0;
-    int size = 0;
-    queue_element.acc_x = 0;
-    queue_element.acc_y = 0;
-    queue_element.acc_z = 0;
+    UBaseType_t size = 0;
     for (;;)
     {
         size = 0;
         vTaskDelay(pdMS_TO_TICKS(ONE_SECOND_MS));
         if (xSemaphoreTake(xMutexBuff, portMAX_DELAY))
         {
+            //Recorrido de todos los elementos de la cola
             while (xQueueReceive(xQueueLightTemp, &queueRegister,
                                  (TickType_t ) 10))
             {
                 if (queueRegister.sensor == light)
                 {
-                    accumulateLight(queueRegister.value);
+                    summatoryLight(queueRegister.value);
                 }
                 else if (queueRegister.sensor == temp)
                 {
-                    accumulateTemp(queueRegister.value);
+                    summatoryTemp(queueRegister.value);
                 }
 
             }
             xSemaphoreGive(xMutexBuff);
         }
-
+        //Obtenemos el tamaño de la cola para calcular la media
         size = uxQueueMessagesWaiting(xQueue);
+        //Recorrido de todos los elementos de la cola
         while (xQueueReceive(xQueue, &queue_element, 0))
         {
-            accumulateAxis(queue_element);
+            summatoryAxis(queue_element);
         }
-        drawAxis(size);
+        drawAxis((int) size);
 
     }
 }
