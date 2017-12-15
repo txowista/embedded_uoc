@@ -52,7 +52,7 @@
 #include "adc14_multiple_channel_no_repeat.h"
 #include "LcdDriver/Crystalfontz128x128_ST7735.h"
 
-// Definicion de parametros RTOS
+// Definicion de parametros
 #define WRITER_TASK_PRIORITY    1
 #define READER_TASK_PRIORITY  2
 #define HEARTBEAT_TASK_PRIORITY 1
@@ -63,7 +63,7 @@
 #define HEART_BEAT_ON_MS 10
 #define HEART_BEAT_OFF_MS 990
 #define TEMP_SIZE 60
-#define FORCEG_TEMP_SIZE 30
+#define FORCEG_TEMP_SIZE 300
 #define TEMP_INIT_FORCEG 20
 #define ROTATION_THRESHOLD 0.2
 #define TITLE_LINE 10
